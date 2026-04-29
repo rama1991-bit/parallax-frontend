@@ -59,7 +59,7 @@ export function QuickAnalyzeBox({ onCardCreated }: QuickAnalyzeBoxProps) {
         <button
           type="submit"
           disabled={loading || !url.trim()}
-          className="rounded-xl bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          className="rounded-xl bg-black px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loading ? "Analyzing..." : "Analyze"}
         </button>
