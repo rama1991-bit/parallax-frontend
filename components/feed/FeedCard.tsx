@@ -80,7 +80,7 @@ export function FeedCard({
         )}
         {card.report_id && <a href={`/reports/${card.report_id}`} className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white">Open report</a>}
         {card.topic_id && <a href={`/topics/${card.topic_id}`} className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white">Open topic</a>}
-        {ingestedArticleId && <a href={`/feed/${card.id}`} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700">Article detail</a>}
+        {ingestedArticleId && <a href={`/articles/${encodeURIComponent(ingestedArticleId)}`} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700">Article detail</a>}
         {ingestedArticleId && <a href={`/compare?articleId=${encodeURIComponent(ingestedArticleId)}`} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700">Compare</a>}
         {sourceKey && <a href={`/sources/${encodeURIComponent(sourceKey)}`} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700">Source</a>}
         <a href={`/feed/${card.id}`} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700">Explain</a>

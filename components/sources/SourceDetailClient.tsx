@@ -76,7 +76,7 @@ function phase2SourceToDetail(data: any): SourceDetail {
       title: article.title,
       summary: article.summary || "No summary available.",
       url: article.url,
-      href: `/compare?articleId=${encodeURIComponent(article.id)}`,
+      href: `/articles/${encodeURIComponent(article.id)}`,
       dominant_frame: article.analysis?.narrative_framing?.[0],
       priority_score: 0,
       key_claims: article.analysis?.key_claims || [],
@@ -88,7 +88,7 @@ function phase2SourceToDetail(data: any): SourceDetail {
     entities: articles.flatMap((article: any) => article.analysis?.entities || []).slice(0, 8),
     limitations: [
       "Phase 2 source records describe ingestion context, not truth certainty.",
-      "Article-id compare and full node analysis are still being implemented.",
+      "OSINT context and default source seeds are still being implemented.",
     ],
   };
 }
