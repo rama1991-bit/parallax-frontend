@@ -88,7 +88,7 @@ function phase2SourceToDetail(data: any): SourceDetail {
     entities: articles.flatMap((article: any) => article.analysis?.entities || []).slice(0, 8),
     limitations: [
       "Phase 2 source records describe ingestion context, not truth certainty.",
-      "OSINT context and default source seeds are still being implemented.",
+      "Default source metadata should be reviewed and refined before production-scale ingestion.",
     ],
   };
 }
