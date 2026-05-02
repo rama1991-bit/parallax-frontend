@@ -123,18 +123,33 @@ export function SmartFeedClient() {
 
   async function analyzeItem(card: any) {
     const url = card?.payload?.url || card?.url;
-    if (!url) return;
+    const ingestedArticleId = card?.ingested_article_id || card?.payload?.ingested_article_id;
+    if (!url && !ingestedArticleId) return;
 
     setAnalyzingItemId(card.id);
     setItemAnalyzeErrors((current) => ({ ...current, [card.id]: "" }));
 
     try {
-      const result = await apiPost("/api/v1/analyze", { url });
+      const result = await apiPost(
+        "/api/v1/analyze",
+        ingestedArticleId ? { ingested_article_id: ingestedArticleId } : { url }
+      );
       if (result?.card) {
-        setCards((prev) => [result.card, ...prev]);
+        setCards((prev) => {
+          let didReplace = false;
+          const replaced = prev.map((item) => {
+            const itemIngestedId = item?.ingested_article_id || item?.payload?.ingested_article_id;
+            if (item.id === result.card.id || (ingestedArticleId && itemIngestedId === ingestedArticleId)) {
+              didReplace = true;
+              return result.card;
+            }
+            return item;
+          });
+          return didReplace ? replaced : [result.card, ...replaced];
+        });
         notifyAlertsUpdated();
       }
-      await track(card.id, "analyze_feed_item");
+      await track(card.id, ingestedArticleId ? "analyze_ingested_article" : "analyze_feed_item");
     } catch (err: any) {
       setItemAnalyzeErrors((current) => ({
         ...current,

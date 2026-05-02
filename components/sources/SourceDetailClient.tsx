@@ -45,6 +45,54 @@ type SourceDetail = {
   limitations: string[];
 };
 
+function phase2SourceToDetail(data: any): SourceDetail {
+  const source = data?.source || {};
+  const articles = data?.articles || [];
+  return {
+    source: {
+      id: source.id,
+      name: source.name || "Source",
+      domain: source.website_url,
+      url: source.website_url,
+    },
+    profile: {
+      sample_size: articles.length,
+      analysis_quality_score: null,
+      coverage_activity_score: articles.length,
+      high_priority_share: 0,
+    },
+    metrics: {
+      signal_count: articles.length,
+      article_count: source.article_count || articles.length,
+      feed_item_count: source.feed_count || 0,
+      saved_count: 0,
+      high_priority_count: 0,
+      avg_priority_score: 0,
+      avg_confidence: null,
+    },
+    signals: articles.map((article: any) => ({
+      id: article.id,
+      card_type: "ingested_article",
+      title: article.title,
+      summary: article.summary || "No summary available.",
+      url: article.url,
+      href: `/compare?articleId=${encodeURIComponent(article.id)}`,
+      dominant_frame: article.analysis?.narrative_framing?.[0],
+      priority_score: 0,
+      key_claims: article.analysis?.key_claims || [],
+      narrative_framing: article.analysis?.narrative_framing || [],
+    })),
+    key_claims: articles.flatMap((article: any) => article.analysis?.key_claims || []).slice(0, 8),
+    dominant_frames: articles.flatMap((article: any) => article.analysis?.narrative_framing || []).slice(0, 8),
+    topics: articles.flatMap((article: any) => article.analysis?.topics || []).slice(0, 8),
+    entities: articles.flatMap((article: any) => article.analysis?.entities || []).slice(0, 8),
+    limitations: [
+      "Phase 2 source records describe ingestion context, not truth certainty.",
+      "Article-id compare and full node analysis are still being implemented.",
+    ],
+  };
+}
+
 function scoreLabel(value?: number | null) {
   if (value === null || value === undefined) return "Unknown";
   return `${Math.round(Number(value) * 100)}%`;
@@ -106,8 +154,13 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
       .then((data) => {
         if (mounted) setDetail(data);
       })
-      .catch((err: any) => {
-        if (mounted) setError(err?.message || "Could not load source.");
+      .catch(async (err: any) => {
+        try {
+          const data = await apiGet(`/api/v1/sources/${encodeURIComponent(sourceId)}`);
+          if (mounted) setDetail(phase2SourceToDetail(data));
+        } catch {
+          if (mounted) setError(err?.message || "Could not load source.");
+        }
       });
 
     return () => {

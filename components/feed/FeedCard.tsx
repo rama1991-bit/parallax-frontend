@@ -20,7 +20,17 @@ export function FeedCard({
   analyzeError?: string;
 }) {
   const itemUrl = card?.payload?.url || card?.url;
-  const sourceKey = card?.payload?.domain || card?.source || card?.payload?.feed_title;
+  const ingestedArticleId = card?.ingested_article_id || card?.payload?.ingested_article_id;
+  const analysisStatus = card?.payload?.analysis_status;
+  const sourceKey =
+    card?.source_id ||
+    card?.payload?.source_id ||
+    card?.payload?.domain ||
+    card?.source ||
+    card?.payload?.feed_title;
+  const canAnalyzeItem =
+    (card.card_type === "feed_item" && itemUrl) ||
+    (ingestedArticleId && analysisStatus !== "analyzed" && !card.report_id);
 
   return (
     <article className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm md:p-5">
@@ -40,7 +50,8 @@ export function FeedCard({
 
       {card.payload && (
         <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
-          {card.payload.domain && <span>{card.payload.domain}</span>}
+          {card.payload.source_name && <span>{card.payload.source_name}</span>}
+          {!card.payload.source_name && card.payload.domain && <span>{card.payload.domain}</span>}
           {card.payload.claim_count !== undefined && <span> · {card.payload.claim_count} claims</span>}
           {card.payload.dominant_frame && <span> · frame: {card.payload.dominant_frame}</span>}
         </div>
@@ -58,17 +69,19 @@ export function FeedCard({
       )}
 
       <div className="mt-4 flex flex-wrap gap-2">
-        {card.card_type === "feed_item" && itemUrl && (
+        {canAnalyzeItem && (
           <button
             onClick={onAnalyzeItem}
             disabled={isAnalyzingItem}
             className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isAnalyzingItem ? "Analyzing..." : "Analyze item"}
+            {isAnalyzingItem ? "Analyzing..." : ingestedArticleId ? "Analyze article" : "Analyze item"}
           </button>
         )}
         {card.report_id && <a href={`/reports/${card.report_id}`} className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white">Open report</a>}
         {card.topic_id && <a href={`/topics/${card.topic_id}`} className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white">Open topic</a>}
+        {ingestedArticleId && <a href={`/feed/${card.id}`} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700">Article detail</a>}
+        {ingestedArticleId && <a href={`/compare?articleId=${encodeURIComponent(ingestedArticleId)}`} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700">Compare</a>}
         {sourceKey && <a href={`/sources/${encodeURIComponent(sourceKey)}`} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700">Source</a>}
         <a href={`/feed/${card.id}`} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700">Explain</a>
         <button onClick={onRead} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700">Read</button>

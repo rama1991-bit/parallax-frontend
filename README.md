@@ -11,6 +11,7 @@ Current usable surfaces:
 - saved reports
 - public briefs and share views
 - source intelligence profiles
+- Phase 2 ingested-article analysis and hydrated article detail
 - onboarding setup flow
 
 Run locally:
@@ -40,7 +41,7 @@ Production deploy checklist:
 2. Set `NEXT_PUBLIC_API_URL` to the deployed backend origin, with no trailing slash.
 3. Set backend `FRONTEND_URL` to the deployed frontend origin so CORS and brief share links match.
 4. Run `npm run build` locally before deploy.
-5. After deploy, test onboarding, feed, alerts, sources, reports, saved reports, compare, and briefs in one browser session.
+5. After deploy, test onboarding, feed, ingested-article analyze, article detail, alerts, sources, reports, saved reports, compare, and briefs in one browser session.
 
 CI:
 
