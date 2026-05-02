@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Columns3, ExternalLink, GitBranch } from "lucide-react";
+import { ArrowLeft, Columns3, ExternalLink, GitBranch, RefreshCw, Search } from "lucide-react";
 import { apiGet } from "@/lib/api";
 
 const TABS = ["Summary", "Claims", "Compare", "Source", "Author", "Background", "OSINT"];
@@ -133,6 +133,9 @@ export function ArticleDetailClient({ articleId }: { articleId: string }) {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("Summary");
   const [selectedNodeId, setSelectedNodeId] = useState("");
+  const [osintContext, setOsintContext] = useState<any>(null);
+  const [osintLoading, setOsintLoading] = useState(false);
+  const [osintError, setOsintError] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -143,6 +146,7 @@ export function ArticleDetailClient({ articleId }: { articleId: string }) {
       .then((data) => {
         if (!mounted) return;
         setDetail(data);
+        setOsintContext(data?.osint_context || null);
         const firstNode = data?.node_graph?.nodes?.[0];
         setSelectedNodeId(firstNode?.id || "");
       })
@@ -168,6 +172,7 @@ export function ArticleDetailClient({ articleId }: { articleId: string }) {
   const narrative = intelligence?.narrative || {};
   const sourceAnalysis = intelligence?.source_analysis || {};
   const comparisonHooks = detail?.comparison_hooks || intelligence?.comparison_hooks || {};
+  const currentOsintContext = osintContext || detail?.osint_context || {};
   const claims = asList(intelligence?.key_claims || article?.analysis?.key_claims || []);
   const entities = intelligence?.entities || {};
   const scores = intelligence?.scores || {};
@@ -177,6 +182,21 @@ export function ArticleDetailClient({ articleId }: { articleId: string }) {
     setActiveTab(tab);
     const firstNode = nodes.find((node: any) => nodeTab(node) === tab);
     if (firstNode) setSelectedNodeId(firstNode.id);
+  }
+
+  async function loadOsint(includeExternal = false) {
+    setOsintLoading(true);
+    setOsintError("");
+    try {
+      const data = await apiGet(
+        `/api/v1/sources/articles/${encodeURIComponent(articleId)}/osint?include_external=${includeExternal ? "true" : "false"}`
+      );
+      setOsintContext(data);
+    } catch (err: any) {
+      setOsintError(err?.message || "Could not load OSINT context.");
+    } finally {
+      setOsintLoading(false);
+    }
   }
 
   function renderSummary() {
@@ -360,25 +380,127 @@ export function ArticleDetailClient({ articleId }: { articleId: string }) {
   }
 
   function renderOsint() {
+    const references = Array.isArray(currentOsintContext?.discovered_references)
+      ? currentOsintContext.discovered_references
+      : [];
+    const retrievalErrors = asList(currentOsintContext?.retrieval_mode?.errors || []);
+    const citations = Array.isArray(currentOsintContext?.citations) ? currentOsintContext.citations : [];
+
     return (
       <div className="space-y-4">
         <Section title="Bounded OSINT Context">
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => loadOsint(false)}
+              disabled={osintLoading}
+              className="inline-flex min-h-11 items-center gap-2 rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-700 disabled:opacity-50"
+            >
+              <RefreshCw className="h-4 w-4" />
+              {osintLoading ? "Refreshing..." : "Refresh context"}
+            </button>
+            <button
+              onClick={() => loadOsint(true)}
+              disabled={osintLoading}
+              className="inline-flex min-h-11 items-center gap-2 rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-700 disabled:opacity-50"
+            >
+              <Search className="h-4 w-4" />
+              Public search
+            </button>
+          </div>
+
+          {osintError && <p className="mt-3 rounded-2xl bg-rose-50 p-3 text-sm text-rose-700">{osintError}</p>}
+          {retrievalErrors.length > 0 && (
+            <ul className="mt-3 space-y-2">
+              {retrievalErrors.map((item) => (
+                <li key={item} className="rounded-2xl bg-amber-50 p-3 text-sm leading-6 text-amber-800">
+                  {item}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="mt-4">
+            <FieldGrid
+              items={[
+                { label: "Status", value: currentOsintContext?.status },
+                { label: "Provider", value: currentOsintContext?.retrieval_mode?.provider },
+                { label: "External enabled", value: String(Boolean(currentOsintContext?.retrieval_mode?.external_enabled)) },
+                { label: "External results", value: currentOsintContext?.retrieval_mode?.external_results_included || 0 },
+                { label: "Overall relevance", value: currentOsintContext?.relevance?.overall },
+                { label: "References", value: references.length },
+              ]}
+            />
+          </div>
+        </Section>
+
+        <Section title="Discovered References">
+          {references.length === 0 ? (
+            <EmptyState>No OSINT references are available yet.</EmptyState>
+          ) : (
+            <div className="space-y-3">
+              {references.map((reference: any, index: number) => (
+                <article key={`${reference.url}-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-wrap gap-2">
+                    <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-600">
+                      {reference.source_type}
+                    </span>
+                    <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-600">
+                      {reference.reliability_level}
+                    </span>
+                    <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-600">
+                      relevance {Math.round((reference.relevance || 0) * 100)}%
+                    </span>
+                  </div>
+                  <h3 className="mt-3 text-sm font-semibold text-slate-950">{reference.title}</h3>
+                  <a
+                    href={reference.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 inline-flex max-w-full items-center gap-2 break-all text-sm text-slate-600 underline"
+                  >
+                    <ExternalLink className="h-4 w-4 shrink-0" />
+                    {reference.url}
+                  </a>
+                  {asList(reference.risks).length > 0 && (
+                    <ul className="mt-3 space-y-1">
+                      {asList(reference.risks).map((risk) => (
+                        <li key={risk} className="text-xs leading-5 text-slate-500">
+                          {risk}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
+        </Section>
+
+        <Section title="Risks And Contradictions">
+          <div className="space-y-3">
+            {asList(currentOsintContext?.risks).map((risk) => (
+              <p key={risk} className="rounded-2xl bg-amber-50 p-3 text-sm leading-6 text-amber-800">
+                {risk}
+              </p>
+            ))}
+            {Array.isArray(currentOsintContext?.contradictions) && currentOsintContext.contradictions.length > 0 && (
+              <JsonBlock value={currentOsintContext.contradictions} />
+            )}
+          </div>
+        </Section>
+
+        <Section title="Citations">
+          {citations.length === 0 ? <EmptyState>No citations available.</EmptyState> : <JsonBlock value={citations} />}
+        </Section>
+
+        <Section title="Search Hooks">
           <JsonBlock
             value={{
-              status: "not_collected",
-              discovered_references: [],
-              source_type: [],
-              reliability_level: "unscored",
-              relevance: "pending",
-              risks: ["OSINT should provide context, not final judgment."],
-              contradictions: [],
-              citations: [],
-              next_step: "Step 7 will add public, legal, sourceable OSINT references.",
+              search_queries: currentOsintContext?.search_queries || comparisonHooks?.search_queries || [],
+              claims_to_check: currentOsintContext?.claims_to_check || [],
+              entities_to_check: currentOsintContext?.entities_to_check || [],
             }}
           />
-        </Section>
-        <Section title="Search Hooks">
-          <JsonBlock value={comparisonHooks?.search_queries || []} />
         </Section>
       </div>
     );
