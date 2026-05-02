@@ -16,11 +16,17 @@ const FILTERS = [
   { key: "saved", label: "Saved" },
 ];
 
+function notifyAlertsUpdated() {
+  window.dispatchEvent(new Event("parallax:alerts-updated"));
+}
+
 export function SmartFeedClient() {
   const [cards, setCards] = useState<any[]>([]);
   const [filter, setFilter] = useState("all");
   const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState("");
+  const [analyzingItemId, setAnalyzingItemId] = useState("");
+  const [itemAnalyzeErrors, setItemAnalyzeErrors] = useState<Record<string, string>>({});
 
   async function load(nextFilter = filter) {
     setError("");
@@ -54,6 +60,7 @@ export function SmartFeedClient() {
 
     try {
       await apiPost(`/api/v1/feed/${cardId}/read`, {});
+      notifyAlertsUpdated();
     } catch {
       setCards(previous);
     }
@@ -98,6 +105,7 @@ export function SmartFeedClient() {
 
     try {
       await apiPost(`/api/v1/feed/${cardId}/dismiss`, {});
+      notifyAlertsUpdated();
     } catch {
       setCards(previous);
     }
@@ -110,6 +118,30 @@ export function SmartFeedClient() {
       });
     } catch {
       // Tracking failure should not break the feed UX.
+    }
+  }
+
+  async function analyzeItem(card: any) {
+    const url = card?.payload?.url || card?.url;
+    if (!url) return;
+
+    setAnalyzingItemId(card.id);
+    setItemAnalyzeErrors((current) => ({ ...current, [card.id]: "" }));
+
+    try {
+      const result = await apiPost("/api/v1/analyze", { url });
+      if (result?.card) {
+        setCards((prev) => [result.card, ...prev]);
+        notifyAlertsUpdated();
+      }
+      await track(card.id, "analyze_feed_item");
+    } catch (err: any) {
+      setItemAnalyzeErrors((current) => ({
+        ...current,
+        [card.id]: err?.message || "Could not analyze this item.",
+      }));
+    } finally {
+      setAnalyzingItemId("");
     }
   }
 
@@ -129,12 +161,20 @@ export function SmartFeedClient() {
           insights—shown as simple cards.
         </p>
 
-        <button
-          onClick={() => load(filter)}
-          className="mt-4 rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700"
-        >
-          Refresh
-        </button>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            onClick={() => load(filter)}
+            className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700"
+          >
+            Refresh
+          </button>
+          <a
+            href="/briefs"
+            className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-700"
+          >
+            Briefs
+          </a>
+        </div>
       </header>
 
       <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1 md:mx-0 md:px-0">
@@ -157,6 +197,7 @@ export function SmartFeedClient() {
         <QuickAnalyzeBox
           onCardCreated={(newCard: any) => {
             setCards((prev) => [newCard, ...prev]);
+            notifyAlertsUpdated();
           }}
         />
       </div>
@@ -182,6 +223,9 @@ export function SmartFeedClient() {
               onSave={() => saveCard(card.id)}
               onUnsave={() => unsaveCard(card.id)}
               onTrack={(type) => track(card.id, type)}
+              onAnalyzeItem={() => analyzeItem(card)}
+              isAnalyzingItem={analyzingItemId === card.id}
+              analyzeError={itemAnalyzeErrors[card.id]}
             />
           ))}
         </div>

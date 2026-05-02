@@ -5,6 +5,9 @@ export function FeedCard({
   onSave,
   onUnsave,
   onTrack,
+  onAnalyzeItem,
+  isAnalyzingItem,
+  analyzeError,
 }: {
   card: any;
   onRead: () => void;
@@ -12,7 +15,13 @@ export function FeedCard({
   onSave?: () => void;
   onUnsave?: () => void;
   onTrack?: (type: string) => void;
+  onAnalyzeItem?: () => void;
+  isAnalyzingItem?: boolean;
+  analyzeError?: string;
 }) {
+  const itemUrl = card?.payload?.url || card?.url;
+  const sourceKey = card?.payload?.domain || card?.source || card?.payload?.feed_title;
+
   return (
     <article className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm md:p-5">
       <div className="flex flex-wrap items-center gap-2">
@@ -49,8 +58,18 @@ export function FeedCard({
       )}
 
       <div className="mt-4 flex flex-wrap gap-2">
+        {card.card_type === "feed_item" && itemUrl && (
+          <button
+            onClick={onAnalyzeItem}
+            disabled={isAnalyzingItem}
+            className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isAnalyzingItem ? "Analyzing..." : "Analyze item"}
+          </button>
+        )}
         {card.report_id && <a href={`/reports/${card.report_id}`} className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white">Open report</a>}
         {card.topic_id && <a href={`/topics/${card.topic_id}`} className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-medium text-white">Open topic</a>}
+        {sourceKey && <a href={`/sources/${encodeURIComponent(sourceKey)}`} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700">Source</a>}
         <a href={`/feed/${card.id}`} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700">Explain</a>
         <button onClick={onRead} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700">Read</button>
         {card.is_saved ? (
@@ -60,6 +79,12 @@ export function FeedCard({
         )}
         <button onClick={onDismiss} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700">Dismiss</button>
       </div>
+
+      {analyzeError && (
+        <p className="mt-3 rounded-2xl bg-rose-50 p-3 text-sm text-rose-700">
+          {analyzeError}
+        </p>
+      )}
 
       <p className="mt-4 text-xs text-slate-400">This card summarizes narrative signals, not truth certainty.</p>
     </article>
