@@ -41,3 +41,7 @@ Production deploy checklist:
 3. Set backend `FRONTEND_URL` to the deployed frontend origin so CORS and brief share links match.
 4. Run `npm run build` locally before deploy.
 5. After deploy, test onboarding, feed, alerts, sources, reports, saved reports, compare, and briefs in one browser session.
+
+CI:
+
+GitHub Actions runs `npm ci` and `npm run build` on pushes and pull requests.
