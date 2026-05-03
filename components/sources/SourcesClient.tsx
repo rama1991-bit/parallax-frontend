@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowRight, Database, Globe2, RefreshCcw } from "lucide-react";
+import { Activity, ArrowRight, Database, Globe2, RefreshCcw } from "lucide-react";
 import { apiGet, apiPost } from "@/lib/api";
 
 type SourceSummary = {
@@ -33,6 +33,20 @@ type Phase2Source = {
   feed_count?: number;
   article_count?: number;
   is_default?: boolean;
+  health?: SourceHealth;
+};
+
+type SourceHealth = {
+  status: "healthy" | "stale" | "error" | "needs_review" | string;
+  label?: string;
+  active_feed_count?: number;
+  articles_24h?: number;
+  run_count?: number;
+  success_rate?: number | null;
+  last_checked_at?: string | null;
+  last_success_at?: string | null;
+  last_error?: string | null;
+  recommendation?: string;
 };
 
 const ADMIN_CONTROLS_ENABLED = process.env.NEXT_PUBLIC_ADMIN_CONTROLS === "true";
@@ -41,6 +55,37 @@ const ADMIN_KEY_STORAGE_KEY = "parallax_admin_key";
 function scoreLabel(value?: number | null) {
   if (value === null || value === undefined) return "Unknown";
   return `${Math.round(Number(value) * 100)}%`;
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return "Never";
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
+
+function healthStyles(status?: string) {
+  if (status === "healthy") return "bg-emerald-50 text-emerald-700";
+  if (status === "stale") return "bg-amber-50 text-amber-700";
+  if (status === "error") return "bg-rose-50 text-rose-700";
+  return "bg-slate-100 text-slate-700";
+}
+
+function HealthBadge({ health }: { health?: SourceHealth }) {
+  const label = health?.label || "Needs review";
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs ${healthStyles(health?.status)}`}>
+      <Activity aria-hidden="true" className="h-3 w-3" />
+      {label}
+    </span>
+  );
 }
 
 function TagList({ items }: { items: string[] }) {
@@ -255,6 +300,7 @@ export function SourcesClient() {
         {syncResult && (
           <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700">
             Synced {syncResult.synced_feed_count || 0} feeds, saved {syncResult.article_count || 0} articles, created {syncResult.card_count || 0} cards, with {syncResult.error_count || 0} errors.
+            {syncResult.sync_run_id ? ` Run ${syncResult.sync_run_id}.` : ""}
           </p>
         )}
 
@@ -282,6 +328,7 @@ export function SourcesClient() {
             {sourceRecords.slice(0, 12).map((source) => (
               <article key={source.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                 <div className="flex flex-wrap gap-2">
+                  <HealthBadge health={source.health} />
                   {source.is_default && (
                     <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">default</span>
                   )}
@@ -303,6 +350,16 @@ export function SourcesClient() {
                   <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
                     {source.article_count || 0} articles
                   </span>
+                  <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                    {source.health?.articles_24h || 0} in 24h
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-1 text-xs leading-5 text-slate-600">
+                  <span>Last success: {formatDateTime(source.health?.last_success_at)}</span>
+                  <span>Success rate: {scoreLabel(source.health?.success_rate)}</span>
+                  {source.health?.last_error && (
+                    <span className="text-rose-700">Last error: {source.health.last_error}</span>
+                  )}
                 </div>
                 <a
                   href={`/sources/${encodeURIComponent(source.id)}`}
