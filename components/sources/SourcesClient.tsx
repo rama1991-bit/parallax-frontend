@@ -62,8 +62,10 @@ export function SourcesClient() {
   const [sourceRecords, setSourceRecords] = useState<Phase2Source[]>([]);
   const [defaultPreview, setDefaultPreview] = useState<any>(null);
   const [seedResult, setSeedResult] = useState<any>(null);
+  const [syncResult, setSyncResult] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
+  const [syncingActive, setSyncingActive] = useState(false);
   const [error, setError] = useState("");
 
   async function loadSources() {
@@ -101,6 +103,24 @@ export function SourcesClient() {
       setError(err?.message || "Could not seed default sources.");
     } finally {
       setSeeding(false);
+    }
+  }
+
+  async function syncActiveSources() {
+    setSyncingActive(true);
+    setError("");
+
+    try {
+      const result = await apiPost(
+        "/api/v1/sources/sync-active?source_limit=25&feed_limit=25&article_limit=5&card_limit=10",
+        {}
+      );
+      setSyncResult(result);
+      await loadSources();
+    } catch (err: any) {
+      setError(err?.message || "Could not sync active source feeds.");
+    } finally {
+      setSyncingActive(false);
     }
   }
 
@@ -152,6 +172,14 @@ export function SourcesClient() {
           >
             {seeding ? "Seeding..." : defaultSourceCount ? "Refresh defaults" : "Seed defaults"}
           </button>
+          <button
+            onClick={syncActiveSources}
+            disabled={syncingActive || !sourceRecords.length}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <RefreshCcw aria-hidden="true" className="h-4 w-4" />
+            {syncingActive ? "Syncing..." : "Sync active"}
+          </button>
         </div>
 
         <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -176,6 +204,12 @@ export function SourcesClient() {
         {seedResult && (
           <p className="mt-3 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">
             Seeded {seedResult.summary?.seeded_source_count || 0} sources and {seedResult.summary?.seeded_feed_count || 0} feeds.
+          </p>
+        )}
+
+        {syncResult && (
+          <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700">
+            Synced {syncResult.synced_feed_count || 0} feeds, saved {syncResult.article_count || 0} articles, created {syncResult.card_count || 0} cards, with {syncResult.error_count || 0} errors.
           </p>
         )}
 
