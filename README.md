@@ -32,9 +32,12 @@ Set:
 
 ```bash
 NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_ADMIN_CONTROLS=false
 ```
 
 The browser stores an anonymous `parallax_session_id` in `localStorage` and sends it as `X-Parallax-Session-Id` so feed cards and reports remain separated before full auth is added.
+
+Set `NEXT_PUBLIC_ADMIN_CONTROLS=true` only for admin-facing deployments. The `/sources` admin controls then ask for an admin key and send it as `X-Parallax-Admin-Key`; the key is kept in `sessionStorage`, not bundled into the app.
 
 Production deploy checklist:
 
@@ -42,7 +45,7 @@ Production deploy checklist:
 2. Set `NEXT_PUBLIC_API_URL` to the deployed backend origin, with no trailing slash.
 3. Set backend `FRONTEND_URL` to the deployed frontend origin so CORS and brief share links match.
 4. Run `npm run build` locally before deploy.
-5. After deploy, test onboarding, feed, default source seeding and active source sync in `/sources`, ingested-article analyze, `/articles/<id>` node tabs and OSINT panel, article-id compare, alerts, sources, reports, saved reports, compare, and briefs in one browser session.
+5. After deploy, test onboarding, feed, admin-gated default source seeding and active source sync in `/sources`, ingested-article analyze, `/articles/<id>` node tabs and OSINT panel, article-id compare, alerts, sources, reports, saved reports, compare, and briefs in one browser session.
 
 CI:
 

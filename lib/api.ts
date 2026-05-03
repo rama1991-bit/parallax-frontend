@@ -64,10 +64,10 @@ export async function apiText(path: string) {
   return res.text();
 }
 
-export async function apiPost(path: string, body: unknown = {}) {
+export async function apiPost(path: string, body: unknown = {}, extraHeaders: Record<string, string> = {}) {
   const res = await fetch(`${API_URL}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...sessionHeaders() },
+    headers: { "Content-Type": "application/json", ...sessionHeaders(), ...extraHeaders },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await getErrorMessage(res));

@@ -35,6 +35,9 @@ type Phase2Source = {
   is_default?: boolean;
 };
 
+const ADMIN_CONTROLS_ENABLED = process.env.NEXT_PUBLIC_ADMIN_CONTROLS === "true";
+const ADMIN_KEY_STORAGE_KEY = "parallax_admin_key";
+
 function scoreLabel(value?: number | null) {
   if (value === null || value === undefined) return "Unknown";
   return `${Math.round(Number(value) * 100)}%`;
@@ -66,6 +69,7 @@ export function SourcesClient() {
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
   const [syncingActive, setSyncingActive] = useState(false);
+  const [adminKey, setAdminKey] = useState("");
   const [error, setError] = useState("");
 
   async function loadSources() {
@@ -88,15 +92,38 @@ export function SourcesClient() {
   }
 
   useEffect(() => {
+    if (ADMIN_CONTROLS_ENABLED && typeof window !== "undefined") {
+      setAdminKey(window.sessionStorage.getItem(ADMIN_KEY_STORAGE_KEY) || "");
+    }
     loadSources();
   }, []);
 
+  function updateAdminKey(value: string) {
+    setAdminKey(value);
+    if (typeof window !== "undefined") {
+      if (value.trim()) {
+        window.sessionStorage.setItem(ADMIN_KEY_STORAGE_KEY, value);
+      } else {
+        window.sessionStorage.removeItem(ADMIN_KEY_STORAGE_KEY);
+      }
+    }
+  }
+
+  function adminHeaders(): Record<string, string> {
+    const key = adminKey.trim();
+    return key ? { "X-Parallax-Admin-Key": key } : {};
+  }
+
   async function seedDefaults() {
+    if (ADMIN_CONTROLS_ENABLED && !adminKey.trim()) {
+      setError("Admin key is required for default source seeding.");
+      return;
+    }
     setSeeding(true);
     setError("");
 
     try {
-      const result = await apiPost("/api/v1/sources/defaults/seed", {});
+      const result = await apiPost("/api/v1/sources/defaults/seed", {}, adminHeaders());
       setSeedResult(result);
       await loadSources();
     } catch (err: any) {
@@ -107,13 +134,18 @@ export function SourcesClient() {
   }
 
   async function syncActiveSources() {
+    if (ADMIN_CONTROLS_ENABLED && !adminKey.trim()) {
+      setError("Admin key is required for active source sync.");
+      return;
+    }
     setSyncingActive(true);
     setError("");
 
     try {
       const result = await apiPost(
         "/api/v1/sources/sync-active?source_limit=25&feed_limit=25&article_limit=5&card_limit=10",
-        {}
+        {},
+        adminHeaders()
       );
       setSyncResult(result);
       await loadSources();
@@ -165,21 +197,34 @@ export function SourcesClient() {
             </p>
           </div>
 
-          <button
-            onClick={seedDefaults}
-            disabled={seeding}
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {seeding ? "Seeding..." : defaultSourceCount ? "Refresh defaults" : "Seed defaults"}
-          </button>
-          <button
-            onClick={syncActiveSources}
-            disabled={syncingActive || !sourceRecords.length}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <RefreshCcw aria-hidden="true" className="h-4 w-4" />
-            {syncingActive ? "Syncing..." : "Sync active"}
-          </button>
+          {ADMIN_CONTROLS_ENABLED && (
+            <div className="grid gap-2 sm:min-w-72">
+              <input
+                value={adminKey}
+                onChange={(event) => updateAdminKey(event.target.value)}
+                type="password"
+                placeholder="Admin API key"
+                className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-500"
+              />
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={seedDefaults}
+                  disabled={seeding || !adminKey.trim()}
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {seeding ? "Seeding..." : defaultSourceCount ? "Refresh defaults" : "Seed defaults"}
+                </button>
+                <button
+                  onClick={syncActiveSources}
+                  disabled={syncingActive || !sourceRecords.length || !adminKey.trim()}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <RefreshCcw aria-hidden="true" className="h-4 w-4" />
+                  {syncingActive ? "Syncing..." : "Sync active"}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
