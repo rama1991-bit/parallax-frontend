@@ -33,6 +33,10 @@ type Phase2Source = {
   feed_count?: number;
   article_count?: number;
   is_default?: boolean;
+  review_status?: string;
+  review_notes?: string | null;
+  disabled_reason?: string | null;
+  quality_score?: number;
   health?: SourceHealth;
 };
 
@@ -78,12 +82,31 @@ function healthStyles(status?: string) {
   return "bg-slate-100 text-slate-700";
 }
 
+function reviewStyles(status?: string) {
+  if (status === "reviewed") return "bg-emerald-50 text-emerald-700";
+  if (status === "quarantined") return "bg-amber-50 text-amber-700";
+  if (status === "disabled") return "bg-rose-50 text-rose-700";
+  return "bg-slate-100 text-slate-700";
+}
+
+function reviewLabel(status?: string) {
+  return (status || "needs_review").replace(/_/g, " ");
+}
+
 function HealthBadge({ health }: { health?: SourceHealth }) {
   const label = health?.label || "Needs review";
   return (
     <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs ${healthStyles(health?.status)}`}>
       <Activity aria-hidden="true" className="h-3 w-3" />
       {label}
+    </span>
+  );
+}
+
+function ReviewBadge({ status }: { status?: string }) {
+  return (
+    <span className={`rounded-full px-2 py-1 text-xs capitalize ${reviewStyles(status)}`}>
+      {reviewLabel(status)}
     </span>
   );
 }
@@ -203,6 +226,9 @@ export function SourcesClient() {
 
   const defaultSummary = defaultPreview?.summary || {};
   const defaultSourceCount = sourceRecords.filter((source) => source.is_default).length;
+  const reviewCount = sourceRecords.filter(
+    (source) => source.review_status !== "reviewed" || Number(source.quality_score || 0) < 0.55
+  ).length;
 
   return (
     <main className="mx-auto max-w-4xl space-y-4 p-4 pb-24 md:p-6">
@@ -272,7 +298,7 @@ export function SourcesClient() {
           )}
         </div>
 
-        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
           <div className="rounded-lg bg-slate-50 p-3">
             <p className="text-xs font-medium text-slate-500">Catalog</p>
             <p className="mt-1 text-lg font-semibold text-slate-950">{defaultSummary.source_count || 0}</p>
@@ -288,6 +314,10 @@ export function SourcesClient() {
           <div className="rounded-lg bg-slate-50 p-3">
             <p className="text-xs font-medium text-slate-500">Seeded</p>
             <p className="mt-1 text-lg font-semibold text-slate-950">{defaultSourceCount}</p>
+          </div>
+          <div className="rounded-lg bg-slate-50 p-3">
+            <p className="text-xs font-medium text-slate-500">Needs review</p>
+            <p className="mt-1 text-lg font-semibold text-slate-950">{reviewCount}</p>
           </div>
         </div>
 
@@ -329,6 +359,7 @@ export function SourcesClient() {
               <article key={source.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                 <div className="flex flex-wrap gap-2">
                   <HealthBadge health={source.health} />
+                  <ReviewBadge status={source.review_status} />
                   {source.is_default && (
                     <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">default</span>
                   )}
@@ -352,6 +383,9 @@ export function SourcesClient() {
                   </span>
                   <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
                     {source.health?.articles_24h || 0} in 24h
+                  </span>
+                  <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                    {scoreLabel(source.quality_score)} quality
                   </span>
                 </div>
                 <div className="mt-3 grid gap-1 text-xs leading-5 text-slate-600">

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Activity, ArrowLeft, ExternalLink, Globe2 } from "lucide-react";
-import { apiGet } from "@/lib/api";
+import { apiGet, apiPost } from "@/lib/api";
 
 type SourceHealth = {
   status: "healthy" | "stale" | "error" | "needs_review" | string;
@@ -25,8 +25,28 @@ type SourceDetail = {
     name: string;
     domain?: string;
     url?: string;
+    review_status?: string;
+    review_notes?: string | null;
+    disabled_reason?: string | null;
+    quality_score?: number;
+    terms_reviewed_at?: string | null;
+    last_reviewed_at?: string | null;
   };
   health?: SourceHealth;
+  quality?: {
+    quality_score: number;
+    quality_grade: string;
+    needs_review: boolean;
+    review_status: string;
+    metadata_completeness: number;
+    feed_count: number;
+    active_feed_count: number;
+    disabled_feed_count: number;
+    health_status: string;
+    factors: string[];
+    risks: string[];
+    recommendation: string;
+  };
   feeds?: Array<{
     id: string;
     feed_url: string;
@@ -35,6 +55,8 @@ type SourceDetail = {
     last_checked_at?: string | null;
     last_success_at?: string | null;
     last_error?: string | null;
+    disabled_reason?: string | null;
+    review_notes?: string | null;
   }>;
   sync_runs?: Array<{
     id: string;
@@ -86,14 +108,22 @@ function phase2SourceToDetail(data: any): SourceDetail {
   const source = data?.source || {};
   const articles = data?.articles || [];
   const health = data?.health || source.health;
+  const quality = data?.quality || source.quality;
   return {
     source: {
       id: source.id,
       name: source.name || "Source",
       domain: source.website_url,
       url: source.website_url,
+      review_status: source.review_status,
+      review_notes: source.review_notes,
+      disabled_reason: source.disabled_reason,
+      quality_score: source.quality_score,
+      terms_reviewed_at: source.terms_reviewed_at,
+      last_reviewed_at: source.last_reviewed_at,
     },
     health,
+    quality,
     feeds: data?.feeds || [],
     sync_runs: data?.sync_runs || [],
     profile: {
@@ -160,11 +190,30 @@ function healthStyles(status?: string) {
   return "bg-slate-100 text-slate-700";
 }
 
+function reviewStyles(status?: string) {
+  if (status === "reviewed") return "bg-emerald-50 text-emerald-700";
+  if (status === "quarantined") return "bg-amber-50 text-amber-700";
+  if (status === "disabled") return "bg-rose-50 text-rose-700";
+  return "bg-slate-100 text-slate-700";
+}
+
+function reviewLabel(status?: string) {
+  return (status || "needs_review").replace(/_/g, " ");
+}
+
 function HealthBadge({ health }: { health?: SourceHealth }) {
   return (
     <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs ${healthStyles(health?.status)}`}>
       <Activity aria-hidden="true" className="h-3 w-3" />
       {health?.label || "Needs review"}
+    </span>
+  );
+}
+
+function ReviewBadge({ status }: { status?: string }) {
+  return (
+    <span className={`rounded-full px-2 py-1 text-xs capitalize ${reviewStyles(status)}`}>
+      {reviewLabel(status)}
     </span>
   );
 }
@@ -217,27 +266,103 @@ function TagList({ items }: { items: string[] }) {
 export function SourceDetailClient({ sourceId }: { sourceId: string }) {
   const [detail, setDetail] = useState<SourceDetail | null>(null);
   const [error, setError] = useState("");
+  const [adminKey, setAdminKey] = useState("");
+  const [actionLoading, setActionLoading] = useState("");
+
+  async function loadDetail(mounted = true) {
+    try {
+      const data = await apiGet(`/api/v1/authors/${encodeURIComponent(sourceId)}`);
+      if (mounted) setDetail(data);
+    } catch (err: any) {
+      try {
+        const data = await apiGet(`/api/v1/sources/${encodeURIComponent(sourceId)}`);
+        if (mounted) setDetail(phase2SourceToDetail(data));
+      } catch {
+        if (mounted) setError(err?.message || "Could not load source.");
+      }
+    }
+  }
 
   useEffect(() => {
     let mounted = true;
-
-    apiGet(`/api/v1/authors/${encodeURIComponent(sourceId)}`)
-      .then((data) => {
-        if (mounted) setDetail(data);
-      })
-      .catch(async (err: any) => {
-        try {
-          const data = await apiGet(`/api/v1/sources/${encodeURIComponent(sourceId)}`);
-          if (mounted) setDetail(phase2SourceToDetail(data));
-        } catch {
-          if (mounted) setError(err?.message || "Could not load source.");
-        }
-      });
+    if (process.env.NEXT_PUBLIC_ADMIN_CONTROLS === "true" && typeof window !== "undefined") {
+      setAdminKey(window.sessionStorage.getItem("parallax_admin_key") || "");
+    }
+    loadDetail(mounted);
 
     return () => {
       mounted = false;
     };
   }, [sourceId]);
+
+  function updateAdminKey(value: string) {
+    setAdminKey(value);
+    if (typeof window !== "undefined") {
+      if (value.trim()) {
+        window.sessionStorage.setItem("parallax_admin_key", value);
+      } else {
+        window.sessionStorage.removeItem("parallax_admin_key");
+      }
+    }
+  }
+
+  function adminHeaders(): Record<string, string> {
+    const key = adminKey.trim();
+    return key ? { "X-Parallax-Admin-Key": key } : {};
+  }
+
+  async function runAdminAction(label: string, action: () => Promise<unknown>) {
+    if (!adminKey.trim()) {
+      setError("Admin key is required for source governance actions.");
+      return;
+    }
+    setActionLoading(label);
+    setError("");
+    try {
+      await action();
+      await loadDetail(true);
+    } catch (err: any) {
+      setError(err?.message || "Could not complete source governance action.");
+    } finally {
+      setActionLoading("");
+    }
+  }
+
+  async function updateSourceReview(reviewStatus: string, termsReviewed = false) {
+    await runAdminAction(reviewStatus, () =>
+      apiPost(
+        `/api/v1/sources/${encodeURIComponent(sourceId)}/review`,
+        {
+          review_status: reviewStatus,
+          review_notes:
+            reviewStatus === "reviewed"
+              ? "Reviewed from source detail."
+              : `Marked ${reviewStatus} from source detail.`,
+          disabled_reason:
+            reviewStatus === "quarantined" || reviewStatus === "disabled"
+              ? `Marked ${reviewStatus} from source detail.`
+              : undefined,
+          terms_reviewed: termsReviewed,
+        },
+        adminHeaders()
+      )
+    );
+  }
+
+  async function updateFeedStatus(feedId: string, status: string) {
+    await runAdminAction(`${feedId}-${status}`, () =>
+      apiPost(
+        `/api/v1/sources/feeds/${encodeURIComponent(feedId)}/status`,
+        {
+          status,
+          disabled_reason:
+            status === "active" ? undefined : `Marked ${status} from source detail.`,
+          review_notes: `Feed marked ${status} from source detail.`,
+        },
+        adminHeaders()
+      )
+    );
+  }
 
   if (error) {
     return (
@@ -265,6 +390,8 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
   }
 
   const source = detail.source;
+  const adminControlsEnabled = process.env.NEXT_PUBLIC_ADMIN_CONTROLS === "true";
+  const canGovernSource = adminControlsEnabled && Array.isArray(detail.feeds);
 
   return (
     <main className="mx-auto max-w-4xl space-y-4 p-4 pb-24 md:p-6">
@@ -303,6 +430,18 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
                 <ExternalLink aria-hidden="true" className="h-4 w-4" />
               </a>
             )}
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <ReviewBadge status={source.review_status} />
+              <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">
+                {scoreLabel(detail.quality?.quality_score ?? source.quality_score)} quality
+              </span>
+              {detail.quality?.quality_grade && (
+                <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700 capitalize">
+                  {detail.quality.quality_grade}
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </article>
@@ -344,6 +483,105 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
         </div>
       </Section>
 
+      <Section title="Source Quality">
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            <ReviewBadge status={source.review_status || detail.quality?.review_status} />
+            <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">
+              {scoreLabel(detail.quality?.metadata_completeness)} metadata
+            </span>
+            <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">
+              {detail.quality?.active_feed_count || 0} active feeds
+            </span>
+            <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">
+              {detail.quality?.disabled_feed_count || 0} disabled feeds
+            </span>
+          </div>
+          {source.review_notes && (
+            <p className="rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700">
+              {source.review_notes}
+            </p>
+          )}
+          {source.disabled_reason && (
+            <p className="rounded-lg bg-rose-50 p-3 text-sm leading-6 text-rose-700">
+              {source.disabled_reason}
+            </p>
+          )}
+          {detail.quality?.recommendation && (
+            <p className="text-sm leading-6 text-slate-700">{detail.quality.recommendation}</p>
+          )}
+          {detail.quality?.factors?.length ? (
+            <TagList items={detail.quality.factors.slice(0, 6)} />
+          ) : null}
+          {detail.quality?.risks?.length ? (
+            <div className="grid gap-2">
+              {detail.quality.risks.slice(0, 5).map((risk) => (
+                <p key={risk} className="rounded-lg bg-amber-50 p-3 text-sm leading-6 text-amber-800">
+                  {risk}
+                </p>
+              ))}
+            </div>
+          ) : null}
+
+          {canGovernSource && (
+            <div className="grid gap-3 border-t border-slate-100 pt-3">
+              <input
+                value={adminKey}
+                onChange={(event) => updateAdminKey(event.target.value)}
+                type="password"
+                placeholder="Admin API key"
+                className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-500"
+              />
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => updateSourceReview("reviewed", true)}
+                  disabled={Boolean(actionLoading) || !adminKey.trim()}
+                  className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Review
+                </button>
+                <button
+                  onClick={() => updateSourceReview("needs_review")}
+                  disabled={Boolean(actionLoading) || !adminKey.trim()}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Needs review
+                </button>
+                <button
+                  onClick={() => updateSourceReview("quarantined")}
+                  disabled={Boolean(actionLoading) || !adminKey.trim()}
+                  className="rounded-lg border border-amber-200 px-3 py-2 text-sm text-amber-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Quarantine
+                </button>
+                <button
+                  onClick={() => updateSourceReview("disabled")}
+                  disabled={Boolean(actionLoading) || !adminKey.trim()}
+                  className="rounded-lg border border-rose-200 px-3 py-2 text-sm text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Disable
+                </button>
+                <button
+                  onClick={() =>
+                    runAdminAction("quality", () =>
+                      apiPost(
+                        `/api/v1/sources/${encodeURIComponent(sourceId)}/quality/recalculate`,
+                        {},
+                        adminHeaders()
+                      )
+                    )
+                  }
+                  disabled={Boolean(actionLoading) || !adminKey.trim()}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Recalculate
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </Section>
+
       {detail.feeds?.length ? (
         <Section title="Feeds">
           <div className="space-y-3">
@@ -364,6 +602,23 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
                 </div>
                 {feed.last_error && (
                   <p className="mt-2 text-xs leading-5 text-rose-700">{feed.last_error}</p>
+                )}
+                {feed.disabled_reason && (
+                  <p className="mt-2 text-xs leading-5 text-amber-800">{feed.disabled_reason}</p>
+                )}
+                {canGovernSource && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {["active", "paused", "quarantined", "disabled"].map((status) => (
+                      <button
+                        key={`${feed.id}-${status}`}
+                        onClick={() => updateFeedStatus(feed.id, status)}
+                        disabled={Boolean(actionLoading) || !adminKey.trim() || feed.status === status}
+                        className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs capitalize text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {status}
+                      </button>
+                    ))}
+                  </div>
                 )}
               </article>
             ))}
