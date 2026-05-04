@@ -53,6 +53,17 @@ type SourceHealth = {
   recommendation?: string;
 };
 
+type OpsAlert = {
+  id: string;
+  alert_type: string;
+  severity: "info" | "warning" | "critical" | string;
+  status: string;
+  source_id?: string | null;
+  title: string;
+  message: string;
+  updated_at?: string;
+};
+
 const ADMIN_CONTROLS_ENABLED = process.env.NEXT_PUBLIC_ADMIN_CONTROLS === "true";
 const ADMIN_KEY_STORAGE_KEY = "parallax_admin_key";
 
@@ -86,6 +97,12 @@ function reviewStyles(status?: string) {
   if (status === "reviewed") return "bg-emerald-50 text-emerald-700";
   if (status === "quarantined") return "bg-amber-50 text-amber-700";
   if (status === "disabled") return "bg-rose-50 text-rose-700";
+  return "bg-slate-100 text-slate-700";
+}
+
+function severityStyles(severity?: string) {
+  if (severity === "critical") return "bg-rose-50 text-rose-700";
+  if (severity === "warning") return "bg-amber-50 text-amber-800";
   return "bg-slate-100 text-slate-700";
 }
 
@@ -134,9 +151,12 @@ export function SourcesClient() {
   const [defaultPreview, setDefaultPreview] = useState<any>(null);
   const [seedResult, setSeedResult] = useState<any>(null);
   const [syncResult, setSyncResult] = useState<any>(null);
+  const [opsAlerts, setOpsAlerts] = useState<OpsAlert[]>([]);
+  const [opsSummary, setOpsSummary] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
   const [syncingActive, setSyncingActive] = useState(false);
+  const [evaluatingOps, setEvaluatingOps] = useState(false);
   const [adminKey, setAdminKey] = useState("");
   const [error, setError] = useState("");
 
@@ -182,6 +202,13 @@ export function SourcesClient() {
     return key ? { "X-Parallax-Admin-Key": key } : {};
   }
 
+  async function loadOpsAlerts() {
+    if (!ADMIN_CONTROLS_ENABLED || !adminKey.trim()) return;
+    const data = await apiGet("/api/v1/sources/ops/alerts?limit=12", adminHeaders());
+    setOpsAlerts(data?.alerts || []);
+    setOpsSummary(data?.summary || null);
+  }
+
   async function seedDefaults() {
     if (ADMIN_CONTROLS_ENABLED && !adminKey.trim()) {
       setError("Admin key is required for default source seeding.");
@@ -216,11 +243,32 @@ export function SourcesClient() {
         adminHeaders()
       );
       setSyncResult(result);
+      setOpsSummary(result?.ops_alerts?.summary || null);
       await loadSources();
+      await loadOpsAlerts();
     } catch (err: any) {
       setError(err?.message || "Could not sync active source feeds.");
     } finally {
       setSyncingActive(false);
+    }
+  }
+
+  async function evaluateOpsAlerts() {
+    if (ADMIN_CONTROLS_ENABLED && !adminKey.trim()) {
+      setError("Admin key is required for operational alert evaluation.");
+      return;
+    }
+    setEvaluatingOps(true);
+    setError("");
+
+    try {
+      const result = await apiPost("/api/v1/sources/ops/alerts/evaluate?limit=250", {}, adminHeaders());
+      setOpsSummary(result?.summary || null);
+      await loadOpsAlerts();
+    } catch (err: any) {
+      setError(err?.message || "Could not evaluate source operational alerts.");
+    } finally {
+      setEvaluatingOps(false);
     }
   }
 
@@ -293,6 +341,14 @@ export function SourcesClient() {
                   <RefreshCcw aria-hidden="true" className="h-4 w-4" />
                   {syncingActive ? "Syncing..." : "Sync active"}
                 </button>
+                <button
+                  onClick={evaluateOpsAlerts}
+                  disabled={evaluatingOps || !sourceRecords.length || !adminKey.trim()}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Activity aria-hidden="true" className="h-4 w-4" />
+                  {evaluatingOps ? "Evaluating..." : "Evaluate ops"}
+                </button>
               </div>
             </div>
           )}
@@ -332,6 +388,33 @@ export function SourcesClient() {
             Synced {syncResult.synced_feed_count || 0} feeds, saved {syncResult.article_count || 0} articles, created {syncResult.card_count || 0} cards, with {syncResult.error_count || 0} errors.
             {syncResult.sync_run_id ? ` Run ${syncResult.sync_run_id}.` : ""}
           </p>
+        )}
+
+        {opsSummary && (
+          <div className="mt-3 grid gap-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-700 sm:grid-cols-3">
+            <span>{opsSummary.critical || 0} critical</span>
+            <span>{opsSummary.warning || 0} warnings</span>
+            <span>{opsSummary.info || 0} info</span>
+          </div>
+        )}
+
+        {opsAlerts.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {opsAlerts.slice(0, 5).map((alert) => (
+              <article key={alert.id} className="rounded-lg bg-white p-3 text-sm leading-6 text-slate-700">
+                <div className="flex flex-wrap gap-2">
+                  <span className={`rounded-full px-2 py-1 text-xs ${severityStyles(alert.severity)}`}>
+                    {alert.severity}
+                  </span>
+                  <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">
+                    {alert.alert_type}
+                  </span>
+                </div>
+                <p className="mt-2 font-medium text-slate-950">{alert.title}</p>
+                <p className="mt-1 text-xs leading-5 text-slate-600">{alert.message}</p>
+              </article>
+            ))}
+          </div>
         )}
 
         {defaultPreview?.sources?.length > 0 && (

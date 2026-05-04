@@ -104,6 +104,16 @@ type SourceDetail = {
   limitations: string[];
 };
 
+type OpsAlert = {
+  id: string;
+  alert_type: string;
+  severity: "info" | "warning" | "critical" | string;
+  status: string;
+  title: string;
+  message: string;
+  updated_at?: string;
+};
+
 function phase2SourceToDetail(data: any): SourceDetail {
   const source = data?.source || {};
   const articles = data?.articles || [];
@@ -197,6 +207,12 @@ function reviewStyles(status?: string) {
   return "bg-slate-100 text-slate-700";
 }
 
+function severityStyles(severity?: string) {
+  if (severity === "critical") return "bg-rose-50 text-rose-700";
+  if (severity === "warning") return "bg-amber-50 text-amber-800";
+  return "bg-slate-100 text-slate-700";
+}
+
 function reviewLabel(status?: string) {
   return (status || "needs_review").replace(/_/g, " ");
 }
@@ -268,6 +284,8 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
   const [error, setError] = useState("");
   const [adminKey, setAdminKey] = useState("");
   const [actionLoading, setActionLoading] = useState("");
+  const [opsAlerts, setOpsAlerts] = useState<OpsAlert[]>([]);
+  const [opsSummary, setOpsSummary] = useState<any>(null);
 
   async function loadDetail(mounted = true) {
     try {
@@ -311,6 +329,16 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
     return key ? { "X-Parallax-Admin-Key": key } : {};
   }
 
+  async function loadOpsAlerts() {
+    if (!adminKey.trim()) return;
+    const data = await apiGet(
+      `/api/v1/sources/ops/alerts?source_id=${encodeURIComponent(sourceId)}&limit=12`,
+      adminHeaders()
+    );
+    setOpsAlerts(data?.alerts || []);
+    setOpsSummary(data?.summary || null);
+  }
+
   async function runAdminAction(label: string, action: () => Promise<unknown>) {
     if (!adminKey.trim()) {
       setError("Admin key is required for source governance actions.");
@@ -321,6 +349,7 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
     try {
       await action();
       await loadDetail(true);
+      await loadOpsAlerts();
     } catch (err: any) {
       setError(err?.message || "Could not complete source governance action.");
     } finally {
@@ -359,6 +388,27 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
             status === "active" ? undefined : `Marked ${status} from source detail.`,
           review_notes: `Feed marked ${status} from source detail.`,
         },
+        adminHeaders()
+      )
+    );
+  }
+
+  async function evaluateSourceOpsAlerts() {
+    await runAdminAction("ops-alerts", async () => {
+      const result = await apiPost(
+        `/api/v1/sources/ops/alerts/evaluate?source_id=${encodeURIComponent(sourceId)}&limit=1`,
+        {},
+        adminHeaders()
+      );
+      setOpsSummary(result?.summary || null);
+    });
+  }
+
+  async function acknowledgeOpsAlert(alertId: string) {
+    await runAdminAction(`ack-${alertId}`, () =>
+      apiPost(
+        `/api/v1/sources/ops/alerts/${encodeURIComponent(alertId)}/acknowledge`,
+        {},
         adminHeaders()
       )
     );
@@ -576,11 +626,53 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
                 >
                   Recalculate
                 </button>
+                <button
+                  onClick={evaluateSourceOpsAlerts}
+                  disabled={Boolean(actionLoading) || !adminKey.trim()}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Evaluate ops
+                </button>
               </div>
             </div>
           )}
         </div>
       </Section>
+
+      {canGovernSource && (opsSummary || opsAlerts.length > 0) ? (
+        <Section title="Operational Alerts">
+          <div className="space-y-3">
+            {opsSummary && (
+              <div className="grid gap-2 text-sm text-slate-700 sm:grid-cols-3">
+                <span className="rounded-lg bg-slate-50 p-3">{opsSummary.critical || 0} critical</span>
+                <span className="rounded-lg bg-slate-50 p-3">{opsSummary.warning || 0} warnings</span>
+                <span className="rounded-lg bg-slate-50 p-3">{opsSummary.info || 0} info</span>
+              </div>
+            )}
+            {opsAlerts.map((alert) => (
+              <article key={alert.id} className="rounded-lg bg-slate-50 p-3">
+                <div className="flex flex-wrap gap-2">
+                  <span className={`rounded-full px-2 py-1 text-xs ${severityStyles(alert.severity)}`}>
+                    {alert.severity}
+                  </span>
+                  <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                    {alert.alert_type}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm font-medium text-slate-950">{alert.title}</p>
+                <p className="mt-1 text-xs leading-5 text-slate-600">{alert.message}</p>
+                <button
+                  onClick={() => acknowledgeOpsAlert(alert.id)}
+                  disabled={Boolean(actionLoading) || !adminKey.trim()}
+                  className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Acknowledge
+                </button>
+              </article>
+            ))}
+          </div>
+        </Section>
+      ) : null}
 
       {detail.feeds?.length ? (
         <Section title="Feeds">

@@ -46,10 +46,10 @@ async function getErrorMessage(res: Response) {
   return text;
 }
 
-export async function apiGet(path: string) {
+export async function apiGet(path: string, extraHeaders: Record<string, string> = {}) {
   const res = await fetch(`${API_URL}${path}`, {
     cache: "no-store",
-    headers: sessionHeaders(),
+    headers: { ...sessionHeaders(), ...extraHeaders },
   });
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
