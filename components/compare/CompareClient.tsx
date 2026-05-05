@@ -245,6 +245,29 @@ export function CompareClient() {
             <ProviderStrip metadata={result.provider_metadata} />
           </section>
 
+          {isArticleCompare && result.event_cluster && (
+            <Section title="Event Cluster">
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700">
+                    {result.event_cluster.article_count || 0} articles
+                  </span>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700">
+                    {(result.event_cluster.source_ids || []).length} sources
+                  </span>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700">
+                    {(result.event_cluster.languages || []).length} languages
+                  </span>
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold leading-6 text-slate-950">{result.event_cluster.title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-slate-700">{result.event_cluster.summary}</p>
+                </div>
+                <TagList items={[...(result.event_cluster.frames || []), ...(result.event_cluster.languages || [])].slice(0, 10)} />
+              </div>
+            </Section>
+          )}
+
           <div className="grid gap-3 md:grid-cols-2">
             <ArticleSide label={isArticleCompare ? "Base article" : "First article"} article={isArticleCompare ? result.base_article : result.left} />
             <ArticleSide label={isArticleCompare ? "Closest match" : "Second article"} article={isArticleCompare ? result.similar_articles?.[0] || {} : result.right} />

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ArrowLeft, Columns3, ExternalLink } from "lucide-react";
-import { apiGet } from "@/lib/api";
+import { API_URL, apiGet } from "@/lib/api";
 
 function asList(value: any): string[] {
   if (!Array.isArray(value)) return [];
@@ -58,6 +58,7 @@ function TagList({ items }: { items: string[] }) {
 export function TopicDetailClient({ topicId }: { topicId: string }) {
   const [intelligence, setIntelligence] = useState<any>(null);
   const [topicDetail, setTopicDetail] = useState<any>(null);
+  const [clusters, setClusters] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -69,11 +70,13 @@ export function TopicDetailClient({ topicId }: { topicId: string }) {
     Promise.all([
       apiGet(`/api/v1/topics/${encodeURIComponent(topicId)}/intelligence`),
       apiGet(`/api/v1/topics/${encodeURIComponent(topicId)}`).catch(() => null),
+      apiGet(`/api/v1/intelligence/clusters?topic_id=${encodeURIComponent(topicId)}&limit=10`).catch(() => null),
     ])
-      .then(([intelligenceData, topicData]) => {
+      .then(([intelligenceData, topicData, clusterData]) => {
         if (!mounted) return;
         setIntelligence(intelligenceData);
         setTopicDetail(topicData);
+        setClusters(clusterData?.items || []);
       })
       .catch((err: any) => {
         if (mounted) setError(err?.message || "Could not load topic intelligence.");
@@ -210,6 +213,61 @@ export function TopicDetailClient({ topicId }: { topicId: string }) {
             </div>
           </div>
         </div>
+      </Section>
+
+      <Section title="Active Event Clusters">
+        {clusters.length ? (
+          <div className="space-y-3">
+            {clusters.slice(0, 6).map((cluster: any) => (
+              <article key={cluster.id} className="rounded-2xl bg-slate-50 p-4">
+                <div className="flex flex-wrap gap-2">
+                  <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-700">
+                    {cluster.article_count || 0} articles
+                  </span>
+                  <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-700">
+                    {(cluster.source_ids || []).length} sources
+                  </span>
+                  <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-700">
+                    {(cluster.languages || []).length} languages
+                  </span>
+                </div>
+                <h3 className="mt-3 text-base font-semibold leading-6 text-slate-950">{cluster.title}</h3>
+                {cluster.summary && <p className="mt-2 text-sm leading-6 text-slate-700">{cluster.summary}</p>}
+                <div className="mt-3">
+                  <TagList items={[...(cluster.languages || []), ...(cluster.countries || [])].slice(0, 8)} />
+                </div>
+                {(cluster.sample_articles || []).length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {(cluster.sample_articles || []).slice(0, 3).map((article: any) => (
+                      <div key={article.id} className="rounded-xl bg-white p-3 text-sm leading-5 text-slate-700">
+                        <p className="font-medium text-slate-950">{article.title}</p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {[article.source, article.language, formatDateTime(article.published_at)].filter(Boolean).join(" / ")}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {(cluster.sample_articles || [])[0]?.id && (
+                    <a href={`/compare?articleId=${encodeURIComponent((cluster.sample_articles || [])[0].id)}`} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                      <Columns3 aria-hidden="true" className="h-4 w-4" />
+                      Compare
+                    </a>
+                  )}
+                  {cluster.id && (
+                    <a href={`${API_URL}/api/v1/intelligence/clusters/${encodeURIComponent(cluster.id)}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                      <ExternalLink aria-hidden="true" className="h-4 w-4" />
+                      Open
+                    </a>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-slate-500">No event clusters match this topic yet.</p>
+        )}
       </Section>
 
       <Section title="Sample Articles">

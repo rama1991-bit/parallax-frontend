@@ -171,6 +171,8 @@ export function SourcesClient() {
   const [syncResult, setSyncResult] = useState<any>(null);
   const [intelligenceResult, setIntelligenceResult] = useState<any>(null);
   const [intelligenceRuns, setIntelligenceRuns] = useState<any[]>([]);
+  const [clusterResult, setClusterResult] = useState<any>(null);
+  const [clusterRuns, setClusterRuns] = useState<any[]>([]);
   const [deliveryResult, setDeliveryResult] = useState<any>(null);
   const [opsAlerts, setOpsAlerts] = useState<OpsAlert[]>([]);
   const [opsSummary, setOpsSummary] = useState<any>(null);
@@ -178,6 +180,7 @@ export function SourcesClient() {
   const [seeding, setSeeding] = useState(false);
   const [syncingActive, setSyncingActive] = useState(false);
   const [refreshingIntelligence, setRefreshingIntelligence] = useState(false);
+  const [refreshingClusters, setRefreshingClusters] = useState(false);
   const [evaluatingOps, setEvaluatingOps] = useState(false);
   const [deliveringOps, setDeliveringOps] = useState(false);
   const [adminKey, setAdminKey] = useState("");
@@ -236,6 +239,12 @@ export function SourcesClient() {
     if (!ADMIN_CONTROLS_ENABLED || !adminKey.trim()) return;
     const data = await apiGet("/api/v1/intelligence/runs?limit=6", adminHeaders());
     setIntelligenceRuns(data?.runs || []);
+  }
+
+  async function loadClusterRuns() {
+    if (!ADMIN_CONTROLS_ENABLED || !adminKey.trim()) return;
+    const data = await apiGet("/api/v1/intelligence/clusters/runs?limit=6", adminHeaders());
+    setClusterRuns(data?.runs || []);
   }
 
   async function seedDefaults() {
@@ -306,6 +315,32 @@ export function SourcesClient() {
       setError(err?.message || "Could not refresh intelligence snapshots.");
     } finally {
       setRefreshingIntelligence(false);
+    }
+  }
+
+  async function refreshClusters() {
+    if (ADMIN_CONTROLS_ENABLED && !adminKey.trim()) {
+      setError("Admin key is required for event cluster refresh.");
+      return;
+    }
+    setRefreshingClusters(true);
+    setError("");
+
+    try {
+      const result = await apiPost(
+        "/api/v1/intelligence/clusters/refresh?article_limit=250&cluster_limit=100&card_limit=50",
+        {},
+        adminHeaders()
+      );
+      setClusterResult(result);
+      if (result?.run) {
+        setClusterRuns((current) => [result.run, ...current.filter((run) => run?.id !== result.run?.id)].slice(0, 6));
+      }
+      await loadSources();
+    } catch (err: any) {
+      setError(err?.message || "Could not refresh event clusters.");
+    } finally {
+      setRefreshingClusters(false);
     }
   }
 
@@ -441,6 +476,22 @@ export function SourcesClient() {
                   Runs
                 </button>
                 <button
+                  onClick={refreshClusters}
+                  disabled={refreshingClusters || !sourceRecords.length || !adminKey.trim()}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <RefreshCcw aria-hidden="true" className="h-4 w-4" />
+                  {refreshingClusters ? "Clustering..." : "Refresh clusters"}
+                </button>
+                <button
+                  onClick={loadClusterRuns}
+                  disabled={!adminKey.trim()}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Activity aria-hidden="true" className="h-4 w-4" />
+                  Cluster runs
+                </button>
+                <button
                   onClick={deliverOpsAlerts}
                   disabled={deliveringOps || !adminKey.trim()}
                   className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
@@ -502,6 +553,26 @@ export function SourcesClient() {
               <div key={run.id} className="grid gap-1 text-xs leading-5 text-slate-600 sm:grid-cols-4">
                 <span className="font-medium text-slate-900">{run.status}</span>
                 <span>{run.snapshot_count || 0} snapshots</span>
+                <span>{run.card_count || 0} cards</span>
+                <span>{formatDateTime(run.started_at)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {clusterResult && (
+          <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700">
+            Refreshed {clusterResult.cluster_count || 0} event clusters from {clusterResult.article_count || 0} articles, created {clusterResult.card_count || 0} feed cards, with {clusterResult.error_count || 0} errors.
+            {clusterResult.run?.id ? ` Run ${clusterResult.run.id}.` : ""}
+          </p>
+        )}
+
+        {clusterRuns.length > 0 && (
+          <div className="mt-3 space-y-2 rounded-lg bg-slate-50 p-3">
+            {clusterRuns.slice(0, 4).map((run) => (
+              <div key={run.id} className="grid gap-1 text-xs leading-5 text-slate-600 sm:grid-cols-4">
+                <span className="font-medium text-slate-900">{run.status}</span>
+                <span>{run.cluster_count || 0} clusters</span>
                 <span>{run.card_count || 0} cards</span>
                 <span>{formatDateTime(run.started_at)}</span>
               </div>
