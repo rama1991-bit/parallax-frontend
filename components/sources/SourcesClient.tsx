@@ -169,12 +169,15 @@ export function SourcesClient() {
   const [defaultPreview, setDefaultPreview] = useState<any>(null);
   const [seedResult, setSeedResult] = useState<any>(null);
   const [syncResult, setSyncResult] = useState<any>(null);
+  const [intelligenceResult, setIntelligenceResult] = useState<any>(null);
+  const [intelligenceRuns, setIntelligenceRuns] = useState<any[]>([]);
   const [deliveryResult, setDeliveryResult] = useState<any>(null);
   const [opsAlerts, setOpsAlerts] = useState<OpsAlert[]>([]);
   const [opsSummary, setOpsSummary] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
   const [syncingActive, setSyncingActive] = useState(false);
+  const [refreshingIntelligence, setRefreshingIntelligence] = useState(false);
   const [evaluatingOps, setEvaluatingOps] = useState(false);
   const [deliveringOps, setDeliveringOps] = useState(false);
   const [adminKey, setAdminKey] = useState("");
@@ -229,6 +232,12 @@ export function SourcesClient() {
     setOpsSummary(data?.summary || null);
   }
 
+  async function loadIntelligenceRuns() {
+    if (!ADMIN_CONTROLS_ENABLED || !adminKey.trim()) return;
+    const data = await apiGet("/api/v1/intelligence/runs?limit=6", adminHeaders());
+    setIntelligenceRuns(data?.runs || []);
+  }
+
   async function seedDefaults() {
     if (ADMIN_CONTROLS_ENABLED && !adminKey.trim()) {
       setError("Admin key is required for default source seeding.");
@@ -271,6 +280,32 @@ export function SourcesClient() {
       setError(err?.message || "Could not sync active source feeds.");
     } finally {
       setSyncingActive(false);
+    }
+  }
+
+  async function refreshIntelligence() {
+    if (ADMIN_CONTROLS_ENABLED && !adminKey.trim()) {
+      setError("Admin key is required for intelligence refresh.");
+      return;
+    }
+    setRefreshingIntelligence(true);
+    setError("");
+
+    try {
+      const result = await apiPost(
+        "/api/v1/intelligence/refresh?source_limit=50&topic_limit=50&article_limit=100&card_limit=50",
+        {},
+        adminHeaders()
+      );
+      setIntelligenceResult(result);
+      if (result?.run) {
+        setIntelligenceRuns((current) => [result.run, ...current.filter((run) => run?.id !== result.run?.id)].slice(0, 6));
+      }
+      await loadSources();
+    } catch (err: any) {
+      setError(err?.message || "Could not refresh intelligence snapshots.");
+    } finally {
+      setRefreshingIntelligence(false);
     }
   }
 
@@ -390,6 +425,22 @@ export function SourcesClient() {
                   {evaluatingOps ? "Evaluating..." : "Evaluate ops"}
                 </button>
                 <button
+                  onClick={refreshIntelligence}
+                  disabled={refreshingIntelligence || !sourceRecords.length || !adminKey.trim()}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <RefreshCcw aria-hidden="true" className="h-4 w-4" />
+                  {refreshingIntelligence ? "Refreshing..." : "Refresh intelligence"}
+                </button>
+                <button
+                  onClick={loadIntelligenceRuns}
+                  disabled={!adminKey.trim()}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Activity aria-hidden="true" className="h-4 w-4" />
+                  Runs
+                </button>
+                <button
                   onClick={deliverOpsAlerts}
                   disabled={deliveringOps || !adminKey.trim()}
                   className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
@@ -436,6 +487,26 @@ export function SourcesClient() {
             Synced {syncResult.synced_feed_count || 0} feeds, saved {syncResult.article_count || 0} articles, created {syncResult.card_count || 0} cards, with {syncResult.error_count || 0} errors.
             {syncResult.sync_run_id ? ` Run ${syncResult.sync_run_id}.` : ""}
           </p>
+        )}
+
+        {intelligenceResult && (
+          <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700">
+            Refreshed {intelligenceResult.snapshot_count || 0} intelligence snapshots, created {intelligenceResult.card_count || 0} feed cards, with {intelligenceResult.error_count || 0} errors.
+            {intelligenceResult.run?.id ? ` Run ${intelligenceResult.run.id}.` : ""}
+          </p>
+        )}
+
+        {intelligenceRuns.length > 0 && (
+          <div className="mt-3 space-y-2 rounded-lg bg-slate-50 p-3">
+            {intelligenceRuns.slice(0, 4).map((run) => (
+              <div key={run.id} className="grid gap-1 text-xs leading-5 text-slate-600 sm:grid-cols-4">
+                <span className="font-medium text-slate-900">{run.status}</span>
+                <span>{run.snapshot_count || 0} snapshots</span>
+                <span>{run.card_count || 0} cards</span>
+                <span>{formatDateTime(run.started_at)}</span>
+              </div>
+            ))}
+          </div>
         )}
 
         {opsSummary && (

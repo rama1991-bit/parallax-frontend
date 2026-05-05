@@ -268,6 +268,12 @@ export function TopicsClient() {
                   ))}
                 </div>
               )}
+              <a
+                href={`/topics/${encodeURIComponent(topic.id)}`}
+                className="mt-4 inline-flex rounded-2xl bg-slate-900 px-3 py-2 text-sm font-medium text-white"
+              >
+                Open
+              </a>
             </article>
             );
           })}
