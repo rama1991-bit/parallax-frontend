@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Activity, ArrowRight, Database, Globe2, RefreshCcw } from "lucide-react";
+import { Activity, ArrowRight, Database, Globe2, RefreshCcw, Send } from "lucide-react";
 import { apiGet, apiPost } from "@/lib/api";
 
 type SourceSummary = {
@@ -62,6 +62,13 @@ type OpsAlert = {
   title: string;
   message: string;
   updated_at?: string;
+  delivery_status?: string;
+  delivery?: {
+    status?: string;
+    created_at?: string;
+    delivered_at?: string | null;
+    error?: string | null;
+  } | null;
 };
 
 const ADMIN_CONTROLS_ENABLED = process.env.NEXT_PUBLIC_ADMIN_CONTROLS === "true";
@@ -106,8 +113,19 @@ function severityStyles(severity?: string) {
   return "bg-slate-100 text-slate-700";
 }
 
+function deliveryStyles(status?: string) {
+  if (status === "delivered") return "bg-emerald-50 text-emerald-700";
+  if (status === "failed") return "bg-rose-50 text-rose-700";
+  if (status === "skipped") return "bg-amber-50 text-amber-800";
+  return "bg-slate-100 text-slate-700";
+}
+
 function reviewLabel(status?: string) {
   return (status || "needs_review").replace(/_/g, " ");
+}
+
+function deliveryLabel(status?: string) {
+  return (status || "not_sent").replace(/_/g, " ");
 }
 
 function HealthBadge({ health }: { health?: SourceHealth }) {
@@ -151,12 +169,14 @@ export function SourcesClient() {
   const [defaultPreview, setDefaultPreview] = useState<any>(null);
   const [seedResult, setSeedResult] = useState<any>(null);
   const [syncResult, setSyncResult] = useState<any>(null);
+  const [deliveryResult, setDeliveryResult] = useState<any>(null);
   const [opsAlerts, setOpsAlerts] = useState<OpsAlert[]>([]);
   const [opsSummary, setOpsSummary] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
   const [syncingActive, setSyncingActive] = useState(false);
   const [evaluatingOps, setEvaluatingOps] = useState(false);
+  const [deliveringOps, setDeliveringOps] = useState(false);
   const [adminKey, setAdminKey] = useState("");
   const [error, setError] = useState("");
 
@@ -244,6 +264,7 @@ export function SourcesClient() {
       );
       setSyncResult(result);
       setOpsSummary(result?.ops_alerts?.summary || null);
+      setDeliveryResult(result?.ops_alert_delivery || null);
       await loadSources();
       await loadOpsAlerts();
     } catch (err: any) {
@@ -269,6 +290,25 @@ export function SourcesClient() {
       setError(err?.message || "Could not evaluate source operational alerts.");
     } finally {
       setEvaluatingOps(false);
+    }
+  }
+
+  async function deliverOpsAlerts() {
+    if (ADMIN_CONTROLS_ENABLED && !adminKey.trim()) {
+      setError("Admin key is required for operational alert delivery.");
+      return;
+    }
+    setDeliveringOps(true);
+    setError("");
+
+    try {
+      const result = await apiPost("/api/v1/sources/ops/alerts/deliver?limit=50", {}, adminHeaders());
+      setDeliveryResult(result);
+      await loadOpsAlerts();
+    } catch (err: any) {
+      setError(err?.message || "Could not deliver source operational alerts.");
+    } finally {
+      setDeliveringOps(false);
     }
   }
 
@@ -349,6 +389,14 @@ export function SourcesClient() {
                   <Activity aria-hidden="true" className="h-4 w-4" />
                   {evaluatingOps ? "Evaluating..." : "Evaluate ops"}
                 </button>
+                <button
+                  onClick={deliverOpsAlerts}
+                  disabled={deliveringOps || !adminKey.trim()}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Send aria-hidden="true" className="h-4 w-4" />
+                  {deliveringOps ? "Delivering..." : "Deliver ops"}
+                </button>
               </div>
             </div>
           )}
@@ -398,6 +446,14 @@ export function SourcesClient() {
           </div>
         )}
 
+        {deliveryResult?.summary && (
+          <div className="mt-3 grid gap-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-700 sm:grid-cols-3">
+            <span>{deliveryResult.summary.delivered || 0} delivered</span>
+            <span>{deliveryResult.summary.failed || 0} failed</span>
+            <span>{deliveryResult.summary.skipped || 0} skipped</span>
+          </div>
+        )}
+
         {opsAlerts.length > 0 && (
           <div className="mt-3 space-y-2">
             {opsAlerts.slice(0, 5).map((alert) => (
@@ -409,9 +465,15 @@ export function SourcesClient() {
                   <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">
                     {alert.alert_type}
                   </span>
+                  <span className={`rounded-full px-2 py-1 text-xs capitalize ${deliveryStyles(alert.delivery_status)}`}>
+                    {deliveryLabel(alert.delivery_status)}
+                  </span>
                 </div>
                 <p className="mt-2 font-medium text-slate-950">{alert.title}</p>
                 <p className="mt-1 text-xs leading-5 text-slate-600">{alert.message}</p>
+                {alert.delivery?.error && (
+                  <p className="mt-2 text-xs leading-5 text-rose-700">{alert.delivery.error}</p>
+                )}
               </article>
             ))}
           </div>

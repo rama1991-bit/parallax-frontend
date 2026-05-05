@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Activity, ArrowLeft, ExternalLink, Globe2 } from "lucide-react";
+import { Activity, ArrowLeft, ExternalLink, Globe2, Send } from "lucide-react";
 import { apiGet, apiPost } from "@/lib/api";
 
 type SourceHealth = {
@@ -112,6 +112,13 @@ type OpsAlert = {
   title: string;
   message: string;
   updated_at?: string;
+  delivery_status?: string;
+  delivery?: {
+    status?: string;
+    created_at?: string;
+    delivered_at?: string | null;
+    error?: string | null;
+  } | null;
 };
 
 function phase2SourceToDetail(data: any): SourceDetail {
@@ -213,8 +220,19 @@ function severityStyles(severity?: string) {
   return "bg-slate-100 text-slate-700";
 }
 
+function deliveryStyles(status?: string) {
+  if (status === "delivered") return "bg-emerald-50 text-emerald-700";
+  if (status === "failed") return "bg-rose-50 text-rose-700";
+  if (status === "skipped") return "bg-amber-50 text-amber-800";
+  return "bg-slate-100 text-slate-700";
+}
+
 function reviewLabel(status?: string) {
   return (status || "needs_review").replace(/_/g, " ");
+}
+
+function deliveryLabel(status?: string) {
+  return (status || "not_sent").replace(/_/g, " ");
 }
 
 function HealthBadge({ health }: { health?: SourceHealth }) {
@@ -286,6 +304,7 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
   const [actionLoading, setActionLoading] = useState("");
   const [opsAlerts, setOpsAlerts] = useState<OpsAlert[]>([]);
   const [opsSummary, setOpsSummary] = useState<any>(null);
+  const [deliveryResult, setDeliveryResult] = useState<any>(null);
 
   async function loadDetail(mounted = true) {
     try {
@@ -401,6 +420,17 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
         adminHeaders()
       );
       setOpsSummary(result?.summary || null);
+    });
+  }
+
+  async function deliverSourceOpsAlerts() {
+    await runAdminAction("deliver-ops-alerts", async () => {
+      const result = await apiPost(
+        `/api/v1/sources/ops/alerts/deliver?source_id=${encodeURIComponent(sourceId)}&limit=25`,
+        {},
+        adminHeaders()
+      );
+      setDeliveryResult(result);
     });
   }
 
@@ -633,6 +663,14 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
                 >
                   Evaluate ops
                 </button>
+                <button
+                  onClick={deliverSourceOpsAlerts}
+                  disabled={Boolean(actionLoading) || !adminKey.trim()}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Send aria-hidden="true" className="h-4 w-4" />
+                  Deliver ops
+                </button>
               </div>
             </div>
           )}
@@ -649,6 +687,13 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
                 <span className="rounded-lg bg-slate-50 p-3">{opsSummary.info || 0} info</span>
               </div>
             )}
+            {deliveryResult?.summary && (
+              <div className="grid gap-2 text-sm text-slate-700 sm:grid-cols-3">
+                <span className="rounded-lg bg-slate-50 p-3">{deliveryResult.summary.delivered || 0} delivered</span>
+                <span className="rounded-lg bg-slate-50 p-3">{deliveryResult.summary.failed || 0} failed</span>
+                <span className="rounded-lg bg-slate-50 p-3">{deliveryResult.summary.skipped || 0} skipped</span>
+              </div>
+            )}
             {opsAlerts.map((alert) => (
               <article key={alert.id} className="rounded-lg bg-slate-50 p-3">
                 <div className="flex flex-wrap gap-2">
@@ -658,9 +703,15 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
                   <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
                     {alert.alert_type}
                   </span>
+                  <span className={`rounded-full px-2 py-1 text-xs capitalize ${deliveryStyles(alert.delivery_status)}`}>
+                    {deliveryLabel(alert.delivery_status)}
+                  </span>
                 </div>
                 <p className="mt-2 text-sm font-medium text-slate-950">{alert.title}</p>
                 <p className="mt-1 text-xs leading-5 text-slate-600">{alert.message}</p>
+                {alert.delivery?.error && (
+                  <p className="mt-2 text-xs leading-5 text-rose-700">{alert.delivery.error}</p>
+                )}
                 <button
                   onClick={() => acknowledgeOpsAlert(alert.id)}
                   disabled={Boolean(actionLoading) || !adminKey.trim()}
