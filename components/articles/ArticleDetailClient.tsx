@@ -21,6 +21,11 @@ function compact(value: any, fallback = "Not available") {
   return String(value);
 }
 
+function providerLabel(metadata: any) {
+  if (!metadata) return "heuristic";
+  return [metadata.provider || "heuristic", metadata.status || "unknown"].filter(Boolean).join(" / ");
+}
+
 function nodeTab(node: any) {
   return node?.node_metadata?.tab || "Summary";
 }
@@ -44,6 +49,17 @@ function JsonBlock({ value }: { value: any }) {
 
 function EmptyState({ children }: { children: React.ReactNode }) {
   return <p className="rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-600">{children}</p>;
+}
+
+function ProviderStrip({ metadata }: { metadata: any }) {
+  if (!metadata) return null;
+  return (
+    <div className="flex flex-wrap gap-2 text-xs text-slate-600">
+      <span className="rounded-full bg-slate-100 px-3 py-1">{providerLabel(metadata)}</span>
+      {metadata.model && <span className="rounded-full bg-slate-100 px-3 py-1">{metadata.model}</span>}
+      {metadata.truth_status && <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-800">{metadata.truth_status}</span>}
+    </div>
+  );
 }
 
 function FieldGrid({ items }: { items: Array<{ label: string; value: any }> }) {
@@ -82,6 +98,9 @@ function PerspectivePanel({ node }: { node: any }) {
 
       <p className="mt-4 text-sm font-medium text-slate-900">{perspective.question}</p>
       <p className="mt-2 text-sm leading-6 text-slate-700">{perspective.summary}</p>
+      <div className="mt-3">
+        <ProviderStrip metadata={perspective.provider_metadata || node?.node_metadata?.provider_metadata} />
+      </div>
 
       {asList(perspective.signals).length > 0 && (
         <div className="mt-4">
@@ -173,6 +192,7 @@ export function ArticleDetailClient({ articleId }: { articleId: string }) {
   const sourceAnalysis = intelligence?.source_analysis || {};
   const comparisonHooks = detail?.comparison_hooks || intelligence?.comparison_hooks || {};
   const currentOsintContext = osintContext || detail?.osint_context || {};
+  const providerMetadata = intelligence?.provider_metadata || article?.analysis?.provider_metadata;
   const claims = asList(intelligence?.key_claims || article?.analysis?.key_claims || []);
   const entities = intelligence?.entities || {};
   const scores = intelligence?.scores || {};
@@ -389,7 +409,8 @@ export function ArticleDetailClient({ articleId }: { articleId: string }) {
     return (
       <div className="space-y-4">
         <Section title="Bounded OSINT Context">
-          <div className="flex flex-wrap gap-2">
+          <ProviderStrip metadata={currentOsintContext?.provider_metadata} />
+          <div className="mt-3 flex flex-wrap gap-2">
             <button
               onClick={() => loadOsint(false)}
               disabled={osintLoading}
@@ -558,6 +579,9 @@ export function ArticleDetailClient({ articleId }: { articleId: string }) {
         <p className="mt-3 text-sm leading-7 text-slate-700">
           {intelligence?.summary || article.summary || "No summary available."}
         </p>
+        <div className="mt-4">
+          <ProviderStrip metadata={providerMetadata} />
+        </div>
         <div className="mt-4 flex flex-wrap gap-2">
           {article.url && (
             <a

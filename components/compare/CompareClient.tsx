@@ -21,6 +21,11 @@ function TagList({ items }: { items: string[] }) {
   );
 }
 
+function providerLabel(metadata: any) {
+  if (!metadata) return "heuristic";
+  return [metadata.provider || "heuristic", metadata.status || "unknown"].filter(Boolean).join(" / ");
+}
+
 function Section({
   title,
   children,
@@ -33,6 +38,17 @@ function Section({
       <h2 className="text-sm font-semibold text-slate-950">{title}</h2>
       <div className="mt-3">{children}</div>
     </section>
+  );
+}
+
+function ProviderStrip({ metadata }: { metadata: any }) {
+  if (!metadata) return null;
+  return (
+    <div className="flex flex-wrap gap-2 text-xs text-slate-600">
+      <span className="rounded-full bg-slate-100 px-3 py-1">{providerLabel(metadata)}</span>
+      {metadata.model && <span className="rounded-full bg-slate-100 px-3 py-1">{metadata.model}</span>}
+      {metadata.truth_status && <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-800">{metadata.truth_status}</span>}
+    </div>
   );
 }
 
@@ -225,6 +241,10 @@ export function CompareClient() {
 
       {result && (
         <div className="space-y-4">
+          <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <ProviderStrip metadata={result.provider_metadata} />
+          </section>
+
           <div className="grid gap-3 md:grid-cols-2">
             <ArticleSide label={isArticleCompare ? "Base article" : "First article"} article={isArticleCompare ? result.base_article : result.left} />
             <ArticleSide label={isArticleCompare ? "Closest match" : "Second article"} article={isArticleCompare ? result.similar_articles?.[0] || {} : result.right} />
