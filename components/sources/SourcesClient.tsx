@@ -173,6 +173,7 @@ export function SourcesClient() {
   const [intelligenceRuns, setIntelligenceRuns] = useState<any[]>([]);
   const [clusterResult, setClusterResult] = useState<any>(null);
   const [clusterRuns, setClusterRuns] = useState<any[]>([]);
+  const [pipelineResult, setPipelineResult] = useState<any>(null);
   const [deliveryResult, setDeliveryResult] = useState<any>(null);
   const [opsAlerts, setOpsAlerts] = useState<OpsAlert[]>([]);
   const [opsSummary, setOpsSummary] = useState<any>(null);
@@ -181,6 +182,7 @@ export function SourcesClient() {
   const [syncingActive, setSyncingActive] = useState(false);
   const [refreshingIntelligence, setRefreshingIntelligence] = useState(false);
   const [refreshingClusters, setRefreshingClusters] = useState(false);
+  const [runningPipeline, setRunningPipeline] = useState(false);
   const [evaluatingOps, setEvaluatingOps] = useState(false);
   const [deliveringOps, setDeliveringOps] = useState(false);
   const [adminKey, setAdminKey] = useState("");
@@ -344,6 +346,32 @@ export function SourcesClient() {
     }
   }
 
+  async function runPipeline() {
+    if (ADMIN_CONTROLS_ENABLED && !adminKey.trim()) {
+      setError("Admin key is required for the intelligence pipeline.");
+      return;
+    }
+    setRunningPipeline(true);
+    setError("");
+
+    try {
+      const result = await apiPost(
+        "/api/v1/intelligence/pipeline/run?source_limit=25&feed_limit=50&sync_article_limit=5&sync_card_limit=15&intelligence_source_limit=50&topic_limit=50&intelligence_article_limit=100&intelligence_card_limit=50&cluster_article_limit=250&cluster_limit=100&cluster_card_limit=50",
+        {},
+        adminHeaders()
+      );
+      setPipelineResult(result);
+      await loadSources();
+      await loadOpsAlerts();
+      await loadIntelligenceRuns();
+      await loadClusterRuns();
+    } catch (err: any) {
+      setError(err?.message || "Could not run intelligence pipeline.");
+    } finally {
+      setRunningPipeline(false);
+    }
+  }
+
   async function evaluateOpsAlerts() {
     if (ADMIN_CONTROLS_ENABLED && !adminKey.trim()) {
       setError("Admin key is required for operational alert evaluation.");
@@ -450,6 +478,14 @@ export function SourcesClient() {
                 >
                   <RefreshCcw aria-hidden="true" className="h-4 w-4" />
                   {syncingActive ? "Syncing..." : "Sync active"}
+                </button>
+                <button
+                  onClick={runPipeline}
+                  disabled={runningPipeline || !sourceRecords.length || !adminKey.trim()}
+                  className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <RefreshCcw aria-hidden="true" className="h-4 w-4" />
+                  {runningPipeline ? "Running..." : "Run pipeline"}
                 </button>
                 <button
                   onClick={evaluateOpsAlerts}
@@ -575,6 +611,22 @@ export function SourcesClient() {
                 <span>{run.cluster_count || 0} clusters</span>
                 <span>{run.card_count || 0} cards</span>
                 <span>{formatDateTime(run.started_at)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {pipelineResult && (
+          <div className="mt-3 space-y-2 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700">
+            <p>
+              Pipeline {pipelineResult.status}: {pipelineResult.summary?.completed_phase_count || 0} phases completed, {pipelineResult.summary?.feed_card_count || 0} cards, {pipelineResult.summary?.cluster_count || 0} clusters, {pipelineResult.summary?.error_count || 0} errors.
+            </p>
+            {(pipelineResult.phases || []).slice(0, 3).map((phase: any) => (
+              <div key={phase.name} className="grid gap-1 text-xs leading-5 text-slate-600 sm:grid-cols-4">
+                <span className="font-medium text-slate-900">{phase.name}</span>
+                <span>{phase.status}</span>
+                <span>{phase.card_count || phase.snapshot_count || phase.cluster_count || 0} outputs</span>
+                <span>{phase.run_id || "no run"}</span>
               </div>
             ))}
           </div>
