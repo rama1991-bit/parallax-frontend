@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Activity, ArrowLeft, ExternalLink, Globe2, Send } from "lucide-react";
+import { Activity, ArrowLeft, ExternalLink, Globe2, RefreshCw, Send } from "lucide-react";
 import { apiGet, apiPost } from "@/lib/api";
 
 type SourceHealth = {
@@ -121,6 +121,33 @@ type OpsAlert = {
   } | null;
 };
 
+type SourceIntelligence = {
+  status?: string;
+  summary?: string;
+  sample?: {
+    article_count?: number;
+    analyzed_count?: number;
+    source_count?: number;
+    latest_article_at?: string | null;
+  };
+  framing_pattern?: {
+    dominant_frames?: any[];
+    frame_distribution?: Array<{ label?: string; count?: number; share?: number }>;
+  };
+  recurring_claims?: any[];
+  tone_pattern?: {
+    dominant_tones?: any[];
+  };
+  weak_spots?: any[];
+  limitations?: any[];
+  provider_metadata?: any;
+  snapshot?: {
+    id?: string;
+    created_at?: string;
+    sample_size?: number;
+  };
+};
+
 function phase2SourceToDetail(data: any): SourceDetail {
   const source = data?.source || {};
   const articles = data?.articles || [];
@@ -235,6 +262,21 @@ function deliveryLabel(status?: string) {
   return (status || "not_sent").replace(/_/g, " ");
 }
 
+function asList(value: any): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (typeof item === "string") return item;
+      return item?.claim || item?.label || item?.name || item?.text || "";
+    })
+    .filter(Boolean);
+}
+
+function providerLabel(metadata: any) {
+  if (!metadata) return "heuristic";
+  return [metadata.provider || "heuristic", metadata.status || "unknown"].filter(Boolean).join(" / ");
+}
+
 function HealthBadge({ health }: { health?: SourceHealth }) {
   return (
     <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs ${healthStyles(health?.status)}`}>
@@ -297,14 +339,47 @@ function TagList({ items }: { items: string[] }) {
   );
 }
 
+function ProviderStrip({ metadata }: { metadata: any }) {
+  if (!metadata) return null;
+  return (
+    <div className="flex flex-wrap gap-2 text-xs text-slate-600">
+      <span className="rounded-full bg-slate-100 px-3 py-1">
+        {providerLabel(metadata)}
+      </span>
+      {metadata.model && (
+        <span className="rounded-full bg-slate-100 px-3 py-1">{metadata.model}</span>
+      )}
+      {metadata.truth_status && (
+        <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-800">
+          {metadata.truth_status}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function SourceDetailClient({ sourceId }: { sourceId: string }) {
   const [detail, setDetail] = useState<SourceDetail | null>(null);
   const [error, setError] = useState("");
   const [adminKey, setAdminKey] = useState("");
   const [actionLoading, setActionLoading] = useState("");
+  const [sourceIntelligence, setSourceIntelligence] = useState<SourceIntelligence | null>(null);
+  const [intelligenceLoading, setIntelligenceLoading] = useState(true);
   const [opsAlerts, setOpsAlerts] = useState<OpsAlert[]>([]);
   const [opsSummary, setOpsSummary] = useState<any>(null);
   const [deliveryResult, setDeliveryResult] = useState<any>(null);
+
+  async function loadSourceIntelligence(mounted = true) {
+    setIntelligenceLoading(true);
+    try {
+      const data = await apiGet(`/api/v1/sources/${encodeURIComponent(sourceId)}/intelligence`);
+      if (mounted) setSourceIntelligence(data);
+    } catch {
+      if (mounted) setSourceIntelligence(null);
+    } finally {
+      if (mounted) setIntelligenceLoading(false);
+    }
+  }
 
   async function loadDetail(mounted = true) {
     try {
@@ -326,6 +401,7 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
       setAdminKey(window.sessionStorage.getItem("parallax_admin_key") || "");
     }
     loadDetail(mounted);
+    loadSourceIntelligence(mounted);
 
     return () => {
       mounted = false;
@@ -431,6 +507,17 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
         adminHeaders()
       );
       setDeliveryResult(result);
+    });
+  }
+
+  async function refreshSourceIntelligence() {
+    await runAdminAction("source-intelligence", async () => {
+      const data = await apiPost(
+        `/api/v1/sources/${encodeURIComponent(sourceId)}/intelligence/refresh`,
+        {},
+        adminHeaders()
+      );
+      setSourceIntelligence(data);
     });
   }
 
@@ -562,6 +649,95 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
           )}
         </div>
       </Section>
+
+      {(sourceIntelligence || intelligenceLoading) && (
+        <Section title="Source Intelligence">
+          {intelligenceLoading ? (
+            <p className="text-sm text-slate-500">Loading source intelligence...</p>
+          ) : sourceIntelligence ? (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <ProviderStrip metadata={sourceIntelligence.provider_metadata} />
+                {canGovernSource && (
+                  <button
+                    onClick={refreshSourceIntelligence}
+                    disabled={Boolean(actionLoading) || !adminKey.trim()}
+                    className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <RefreshCw aria-hidden="true" className="h-4 w-4" />
+                    Refresh
+                  </button>
+                )}
+              </div>
+
+              <p className="text-sm leading-6 text-slate-700">
+                {sourceIntelligence.summary || "No intelligence summary available yet."}
+              </p>
+
+              <div className="grid gap-2 text-sm text-slate-700 sm:grid-cols-3">
+                <span className="rounded-lg bg-slate-50 p-3">
+                  {sourceIntelligence.sample?.article_count || 0} articles
+                </span>
+                <span className="rounded-lg bg-slate-50 p-3">
+                  {sourceIntelligence.sample?.analyzed_count || 0} analyzed
+                </span>
+                <span className="rounded-lg bg-slate-50 p-3">
+                  Updated {formatDateTime(sourceIntelligence.snapshot?.created_at)}
+                </span>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Dominant frames
+                  </h3>
+                  <div className="mt-2">
+                    <TagList items={asList(sourceIntelligence.framing_pattern?.dominant_frames)} />
+                  </div>
+                </div>
+                <div>
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Tone pattern
+                  </h3>
+                  <div className="mt-2">
+                    <TagList items={asList(sourceIntelligence.tone_pattern?.dominant_tones)} />
+                  </div>
+                </div>
+              </div>
+
+              {asList(sourceIntelligence.recurring_claims).length > 0 && (
+                <div>
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Recurring claims
+                  </h3>
+                  <ol className="mt-2 space-y-2">
+                    {asList(sourceIntelligence.recurring_claims).slice(0, 5).map((claim, index) => (
+                      <li
+                        key={`${claim}-${index}`}
+                        className="rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700"
+                      >
+                        {claim}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+
+              {asList(sourceIntelligence.weak_spots).length > 0 && (
+                <div className="grid gap-2">
+                  {asList(sourceIntelligence.weak_spots).slice(0, 4).map((item) => (
+                    <p key={item} className="rounded-lg bg-amber-50 p-3 text-sm leading-6 text-amber-800">
+                      {item}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500">No source intelligence snapshot available yet.</p>
+          )}
+        </Section>
+      )}
 
       <Section title="Source Quality">
         <div className="space-y-3">

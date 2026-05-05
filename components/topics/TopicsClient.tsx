@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { apiGet, apiPost } from "@/lib/api";
 
 function parseKeywords(value: string) {
@@ -10,8 +10,24 @@ function parseKeywords(value: string) {
     .filter(Boolean);
 }
 
+function asList(value: any): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (typeof item === "string") return item;
+      return item?.claim || item?.label || item?.name || item?.text || "";
+    })
+    .filter(Boolean);
+}
+
+function providerLabel(metadata: any) {
+  if (!metadata) return "heuristic";
+  return [metadata.provider || "heuristic", metadata.status || "unknown"].filter(Boolean).join(" / ");
+}
+
 export function TopicsClient() {
   const [topics, setTopics] = useState<any[]>([]);
+  const [topicIntelligence, setTopicIntelligence] = useState<any[]>([]);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [keywords, setKeywords] = useState("");
@@ -23,8 +39,12 @@ export function TopicsClient() {
     setError("");
 
     try {
-      const data = await apiGet("/api/v1/topics");
+      const [data, intelligenceData] = await Promise.all([
+        apiGet("/api/v1/topics"),
+        apiGet("/api/v1/topics/intelligence?limit=25").catch(() => ({ items: [] })),
+      ]);
       setTopics(data?.topics || []);
+      setTopicIntelligence(intelligenceData?.items || []);
     } catch (err: any) {
       setError(err?.message || "Could not load topics.");
     } finally {
@@ -35,6 +55,14 @@ export function TopicsClient() {
   useEffect(() => {
     loadTopics();
   }, []);
+
+  const intelligenceByTopic = useMemo(() => {
+    return Object.fromEntries(
+      topicIntelligence
+        .filter((item) => item?.topic?.id)
+        .map((item) => [item.topic.id, item])
+    );
+  }, [topicIntelligence]);
 
   async function createMonitor(e: React.FormEvent) {
     e.preventDefault();
@@ -131,6 +159,52 @@ export function TopicsClient() {
         {error && <p className="mt-3 text-sm text-rose-600">{error}</p>}
       </form>
 
+      {topicIntelligence.length > 0 && (
+        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-slate-950">
+              Topic intelligence
+            </h2>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700">
+              {topicIntelligence.length} snapshots
+            </span>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {topicIntelligence.slice(0, 4).map((item) => (
+              <article key={item.topic?.id || item.summary} className="rounded-2xl bg-slate-50 p-4">
+                <div className="flex flex-wrap gap-2">
+                  <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-700">
+                    {item.sample?.article_count || 0} articles
+                  </span>
+                  <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-700">
+                    {item.sample?.source_count || 0} sources
+                  </span>
+                  <span className="rounded-full bg-white px-3 py-1 text-xs text-slate-700">
+                    {providerLabel(item.provider_metadata)}
+                  </span>
+                </div>
+                <h3 className="mt-3 text-base font-semibold leading-6 text-slate-950">
+                  {item.topic?.name || "Topic"}
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-slate-700">
+                  {item.summary || "No topic intelligence summary yet."}
+                </p>
+                {asList(item.framing_pattern?.dominant_frames).length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {asList(item.framing_pattern?.dominant_frames).slice(0, 4).map((frame) => (
+                      <span key={frame} className="rounded-full bg-white px-3 py-1 text-xs text-slate-700">
+                        {frame}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
       {loading ? (
         <p className="rounded-3xl border border-slate-200 bg-white p-5 text-sm text-slate-500">
           Loading topic monitors...
@@ -146,11 +220,13 @@ export function TopicsClient() {
         </section>
       ) : (
         <div className="space-y-3">
-          {topics.map((topic) => (
-            <article
-              key={topic.id}
-              className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"
-            >
+          {topics.map((topic) => {
+            const intelligence = intelligenceByTopic[topic.id];
+            return (
+              <article
+                key={topic.id}
+                className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"
+              >
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700">
                   {topic.monitor?.status || "active"}
@@ -158,6 +234,11 @@ export function TopicsClient() {
                 <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700">
                   {topic.article_count || 0} articles
                 </span>
+                {intelligence && (
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700">
+                    {intelligence.sample?.source_count || 0} sources
+                  </span>
+                )}
               </div>
 
               <h2 className="mt-3 text-xl font-semibold leading-7 text-slate-950">
@@ -166,6 +247,12 @@ export function TopicsClient() {
               {topic.description && (
                 <p className="mt-2 text-sm leading-6 text-slate-700">
                   {topic.description}
+                </p>
+              )}
+
+              {intelligence?.summary && (
+                <p className="mt-3 rounded-2xl bg-slate-50 p-3 text-sm leading-6 text-slate-700">
+                  {intelligence.summary}
                 </p>
               )}
 
@@ -182,7 +269,8 @@ export function TopicsClient() {
                 </div>
               )}
             </article>
-          ))}
+            );
+          })}
         </div>
       )}
     </main>
