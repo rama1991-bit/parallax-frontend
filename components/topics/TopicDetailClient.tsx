@@ -61,6 +61,47 @@ function percentLabel(value: any) {
   return `${Math.round(number * 100)}%`;
 }
 
+function ClusterAutomation({ automation }: { automation: any }) {
+  const tasks = Array.isArray(automation?.coverage_gap_tasks) ? automation.coverage_gap_tasks : [];
+  const searches = Array.isArray(automation?.suggested_source_searches) ? automation.suggested_source_searches : [];
+  if (!tasks.length && !searches.length) return null;
+
+  return (
+    <div className="mt-3 grid gap-3 md:grid-cols-2">
+      {tasks.length > 0 && (
+        <div className="rounded-2xl bg-white p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Coverage Tasks</p>
+          <div className="mt-2 space-y-2">
+            {tasks.slice(0, 3).map((task: any, index: number) => (
+              <div key={`${task.type || "task"}-${index}`} className="rounded-xl bg-amber-50 p-3">
+                <div className="flex flex-wrap gap-2">
+                  <span className="rounded-full bg-white px-2 py-1 text-xs text-amber-800">{task.priority || "medium"}</span>
+                  <span className="rounded-full bg-white px-2 py-1 text-xs text-amber-800">{task.type || "coverage_gap"}</span>
+                </div>
+                <p className="mt-2 text-sm font-medium text-amber-950">{task.label || "Review coverage gap"}</p>
+                <p className="mt-1 text-xs leading-5 text-amber-900">{task.reason}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {searches.length > 0 && (
+        <div className="rounded-2xl bg-white p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Source Searches</p>
+          <div className="mt-2 space-y-2">
+            {searches.slice(0, 3).map((search: any, index: number) => (
+              <div key={`${search.query || "search"}-${index}`} className="rounded-xl bg-slate-50 p-3">
+                <p className="text-sm font-medium leading-6 text-slate-900">{search.query}</p>
+                <p className="mt-1 text-xs leading-5 text-slate-600">{search.reason}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TopicDetailClient({ topicId }: { topicId: string }) {
   const [intelligence, setIntelligence] = useState<any>(null);
   const [topicDetail, setTopicDetail] = useState<any>(null);
@@ -229,6 +270,7 @@ export function TopicDetailClient({ topicId }: { topicId: string }) {
               const quality = metadata.cluster_quality || {};
               const diversity = metadata.source_diversity || {};
               const bridgeTerms = metadata.language_bridge_terms || [];
+              const automation = metadata.automation || {};
               return (
                 <article key={cluster.id} className="rounded-2xl bg-slate-50 p-4">
                   <div className="flex flex-wrap gap-2">
@@ -261,6 +303,7 @@ export function TopicDetailClient({ topicId }: { topicId: string }) {
                       <TagList items={bridgeTerms} />
                     </div>
                   )}
+                  <ClusterAutomation automation={automation} />
                   {(cluster.sample_articles || []).length > 0 && (
                     <div className="mt-3 space-y-2">
                       {(cluster.sample_articles || []).slice(0, 3).map((article: any) => (

@@ -737,6 +737,8 @@ export function SourcesClient() {
             Refreshed {clusterResult.cluster_count || 0} event clusters from {clusterResult.article_count || 0} articles, created {clusterResult.card_count || 0} feed cards, with {clusterResult.error_count || 0} errors.
             {clusterResult.run?.summary?.cross_language_cluster_count !== undefined ? ` Cross-language ${clusterResult.run.summary.cross_language_cluster_count}.` : ""}
             {clusterResult.run?.summary?.average_cluster_quality !== undefined ? ` Avg quality ${Math.round((clusterResult.run.summary.average_cluster_quality || 0) * 100)}%.` : ""}
+            {clusterResult.run?.summary?.coverage_gap_task_count !== undefined ? ` Tasks ${clusterResult.run.summary.coverage_gap_task_count}.` : ""}
+            {clusterResult.run?.summary?.suggested_source_search_count !== undefined ? ` Searches ${clusterResult.run.summary.suggested_source_search_count}.` : ""}
             {clusterResult.run?.id ? ` Run ${clusterResult.run.id}.` : ""}
           </p>
         )}

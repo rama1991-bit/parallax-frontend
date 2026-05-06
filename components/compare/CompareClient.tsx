@@ -278,6 +278,58 @@ function SourceDifferenceList({ items }: { items: any[] }) {
   );
 }
 
+function ClusterAutomation({ automation }: { automation: any }) {
+  const tasks = Array.isArray(automation?.coverage_gap_tasks) ? automation.coverage_gap_tasks : [];
+  const searches = Array.isArray(automation?.suggested_source_searches) ? automation.suggested_source_searches : [];
+  if (!tasks.length && !searches.length) return null;
+
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      {tasks.length > 0 && (
+        <div>
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Coverage Tasks</p>
+          <div className="space-y-2">
+            {tasks.slice(0, 4).map((task: any, index: number) => (
+              <article key={`${task.type || "task"}-${index}`} className="rounded-2xl bg-amber-50 p-3">
+                <div className="flex flex-wrap gap-2">
+                  <span className="rounded-full bg-white px-2 py-1 text-xs text-amber-800">
+                    {task.priority || "medium"}
+                  </span>
+                  <span className="rounded-full bg-white px-2 py-1 text-xs text-amber-800">
+                    {task.type || "coverage_gap"}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm font-medium text-amber-950">{task.label || "Review coverage gap"}</p>
+                <p className="mt-1 text-xs leading-5 text-amber-900">{task.reason}</p>
+                {task.search_query && (
+                  <p className="mt-2 rounded-xl bg-white p-2 text-xs leading-5 text-amber-900">{task.search_query}</p>
+                )}
+              </article>
+            ))}
+          </div>
+        </div>
+      )}
+      {searches.length > 0 && (
+        <div>
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Source Searches</p>
+          <div className="space-y-2">
+            {searches.slice(0, 4).map((search: any, index: number) => (
+              <article key={`${search.query || "search"}-${index}`} className="rounded-2xl bg-slate-50 p-3">
+                <p className="text-sm font-medium leading-6 text-slate-900">{search.query}</p>
+                <p className="mt-1 text-xs leading-5 text-slate-600">{search.reason}</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {search.language && <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">{search.language}</span>}
+                  {search.source_type && <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">{search.source_type}</span>}
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function CompareClient() {
   const searchParams = useSearchParams();
   const articleId = searchParams.get("articleId") || "";
@@ -473,6 +525,7 @@ export function CompareClient() {
                     <TagList items={result.event_cluster.language_bridge_terms || []} />
                   </div>
                 )}
+                <ClusterAutomation automation={result.event_cluster.automation} />
               </div>
             </Section>
           )}
