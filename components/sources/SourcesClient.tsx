@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Activity, ArrowRight, Database, Globe2, RefreshCcw, Send } from "lucide-react";
+import { FormEvent, useEffect, useState } from "react";
+import { Activity, ArrowRight, Database, Globe2, Plus, RefreshCcw, Send } from "lucide-react";
 import { apiGet, apiPost } from "@/lib/api";
 
 type SourceSummary = {
@@ -40,6 +40,19 @@ type Phase2Source = {
   health?: SourceHealth;
 };
 
+type SourceFormState = {
+  name: string;
+  website_url: string;
+  rss_url: string;
+  country: string;
+  language: string;
+  region: string;
+  source_size: string;
+  source_type: string;
+  feed_type: "rss" | "homepage" | "manual";
+  credibility_notes: string;
+};
+
 type SourceHealth = {
   status: "healthy" | "stale" | "error" | "needs_review" | string;
   label?: string;
@@ -73,6 +86,29 @@ type OpsAlert = {
 
 const ADMIN_CONTROLS_ENABLED = process.env.NEXT_PUBLIC_ADMIN_CONTROLS === "true";
 const ADMIN_KEY_STORAGE_KEY = "parallax_admin_key";
+const EMPTY_SOURCE_FORM: SourceFormState = {
+  name: "",
+  website_url: "",
+  rss_url: "",
+  country: "",
+  language: "",
+  region: "",
+  source_size: "medium",
+  source_type: "newspaper",
+  feed_type: "homepage",
+  credibility_notes: "",
+};
+const SOURCE_SIZE_OPTIONS = ["major", "medium", "small", "niche"];
+const SOURCE_TYPE_OPTIONS = [
+  "news_agency",
+  "newspaper",
+  "broadcaster",
+  "magazine",
+  "independent",
+  "state_media",
+  "NGO",
+  "official",
+];
 
 function scoreLabel(value?: number | null) {
   if (value === null || value === undefined) return "Unknown";
@@ -177,8 +213,11 @@ export function SourcesClient() {
   const [deliveryResult, setDeliveryResult] = useState<any>(null);
   const [opsAlerts, setOpsAlerts] = useState<OpsAlert[]>([]);
   const [opsSummary, setOpsSummary] = useState<any>(null);
+  const [sourceForm, setSourceForm] = useState<SourceFormState>(EMPTY_SOURCE_FORM);
+  const [sourceCreateResult, setSourceCreateResult] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
+  const [creatingSource, setCreatingSource] = useState(false);
   const [syncingActive, setSyncingActive] = useState(false);
   const [refreshingIntelligence, setRefreshingIntelligence] = useState(false);
   const [refreshingClusters, setRefreshingClusters] = useState(false);
@@ -230,6 +269,10 @@ export function SourcesClient() {
     return key ? { "X-Parallax-Admin-Key": key } : {};
   }
 
+  function updateSourceForm(field: keyof SourceFormState, value: string) {
+    setSourceForm((current) => ({ ...current, [field]: value }) as SourceFormState);
+  }
+
   async function loadOpsAlerts() {
     if (!ADMIN_CONTROLS_ENABLED || !adminKey.trim()) return;
     const data = await apiGet("/api/v1/sources/ops/alerts?limit=12", adminHeaders());
@@ -265,6 +308,60 @@ export function SourcesClient() {
       setError(err?.message || "Could not seed default sources.");
     } finally {
       setSeeding(false);
+    }
+  }
+
+  async function createSource(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (ADMIN_CONTROLS_ENABLED && !adminKey.trim()) {
+      setError("Admin key is required for source creation.");
+      return;
+    }
+
+    const name = sourceForm.name.trim();
+    const websiteUrl = sourceForm.website_url.trim();
+    const rssUrl = sourceForm.rss_url.trim();
+    const feedType = sourceForm.feed_type;
+    if (!name) {
+      setError("Source name is required.");
+      return;
+    }
+    if (feedType === "rss" && !rssUrl) {
+      setError("RSS URL is required for RSS sources.");
+      return;
+    }
+    if (feedType !== "rss" && !websiteUrl) {
+      setError("Website URL is required for homepage and manual sources.");
+      return;
+    }
+
+    setCreatingSource(true);
+    setError("");
+
+    try {
+      const result = await apiPost(
+        "/api/v1/sources",
+        {
+          name,
+          website_url: websiteUrl || undefined,
+          rss_url: feedType === "rss" ? rssUrl : undefined,
+          country: sourceForm.country.trim() || undefined,
+          language: sourceForm.language.trim() || undefined,
+          region: sourceForm.region.trim() || undefined,
+          source_size: sourceForm.source_size || undefined,
+          source_type: sourceForm.source_type || undefined,
+          feed_type: feedType,
+          credibility_notes: sourceForm.credibility_notes.trim() || undefined,
+        },
+        adminHeaders()
+      );
+      setSourceCreateResult(result);
+      setSourceForm(EMPTY_SOURCE_FORM);
+      await loadSources();
+    } catch (err: any) {
+      setError(err?.message || "Could not create source.");
+    } finally {
+      setCreatingSource(false);
     }
   }
 
@@ -683,6 +780,146 @@ export function SourcesClient() {
           </div>
         )}
       </section>
+
+      {ADMIN_CONTROLS_ENABLED && (
+        <section className="rounded-lg border border-slate-200 bg-white p-5">
+          <div className="flex items-center gap-2 text-slate-700">
+            <Plus aria-hidden="true" className="h-5 w-5" />
+            <h2 className="text-base font-semibold text-slate-950">Add source</h2>
+          </div>
+          <form onSubmit={createSource} className="mt-4 grid gap-3">
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="grid gap-1 text-xs font-medium text-slate-600">
+                Name
+                <input
+                  value={sourceForm.name}
+                  onChange={(event) => updateSourceForm("name", event.target.value)}
+                  placeholder="Example Daily"
+                  className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-slate-500"
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-medium text-slate-600">
+                Feed type
+                <select
+                  value={sourceForm.feed_type}
+                  onChange={(event) => updateSourceForm("feed_type", event.target.value)}
+                  className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-slate-500"
+                >
+                  <option value="homepage">Homepage</option>
+                  <option value="rss">RSS</option>
+                  <option value="manual">Manual</option>
+                </select>
+              </label>
+              <label className="grid gap-1 text-xs font-medium text-slate-600">
+                Website URL
+                <input
+                  value={sourceForm.website_url}
+                  onChange={(event) => updateSourceForm("website_url", event.target.value)}
+                  placeholder="https://example.com"
+                  className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-slate-500"
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-medium text-slate-600">
+                RSS URL
+                <input
+                  value={sourceForm.rss_url}
+                  onChange={(event) => updateSourceForm("rss_url", event.target.value)}
+                  placeholder="https://example.com/rss.xml"
+                  className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-slate-500"
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-medium text-slate-600">
+                Country
+                <input
+                  value={sourceForm.country}
+                  onChange={(event) => updateSourceForm("country", event.target.value)}
+                  placeholder="United States"
+                  className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-slate-500"
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-medium text-slate-600">
+                Language
+                <input
+                  value={sourceForm.language}
+                  onChange={(event) => updateSourceForm("language", event.target.value)}
+                  placeholder="English"
+                  className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-slate-500"
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-medium text-slate-600">
+                Region
+                <input
+                  value={sourceForm.region}
+                  onChange={(event) => updateSourceForm("region", event.target.value)}
+                  placeholder="North America"
+                  className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-slate-500"
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-medium text-slate-600">
+                Size
+                <select
+                  value={sourceForm.source_size}
+                  onChange={(event) => updateSourceForm("source_size", event.target.value)}
+                  className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-slate-500"
+                >
+                  {SOURCE_SIZE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid gap-1 text-xs font-medium text-slate-600">
+                Type
+                <select
+                  value={sourceForm.source_type}
+                  onChange={(event) => updateSourceForm("source_type", event.target.value)}
+                  className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-slate-500"
+                >
+                  {SOURCE_TYPE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <label className="grid gap-1 text-xs font-medium text-slate-600">
+              Credibility notes
+              <textarea
+                value={sourceForm.credibility_notes}
+                onChange={(event) => updateSourceForm("credibility_notes", event.target.value)}
+                rows={3}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-slate-500"
+              />
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="submit"
+                disabled={creatingSource || !adminKey.trim()}
+                className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Plus aria-hidden="true" className="h-4 w-4" />
+                {creatingSource ? "Adding..." : "Add source"}
+              </button>
+              {sourceCreateResult?.source?.id && (
+                <a
+                  href={`/sources/${encodeURIComponent(sourceCreateResult.source.id)}`}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700"
+                >
+                  Open
+                  <ArrowRight aria-hidden="true" className="h-4 w-4" />
+                </a>
+              )}
+            </div>
+            {sourceCreateResult?.source?.name && (
+              <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">
+                Added {sourceCreateResult.source.name} with {sourceCreateResult.feed?.feed_type || "no"} feed.
+              </p>
+            )}
+          </form>
+        </section>
+      )}
 
       {error && (
         <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">

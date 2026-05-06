@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Activity, ArrowLeft, ExternalLink, Globe2, RefreshCw, Send } from "lucide-react";
+import { FormEvent, useEffect, useState } from "react";
+import { Activity, ArrowLeft, ExternalLink, Globe2, Plus, RefreshCw, Send } from "lucide-react";
 import { apiGet, apiPost } from "@/lib/api";
 
 type SourceHealth = {
@@ -69,6 +69,7 @@ type SourceDetail = {
     article_count: number;
     card_count: number;
     error_count: number;
+    summary?: Record<string, any>;
   }>;
   profile: {
     sample_size: number;
@@ -146,6 +147,26 @@ type SourceIntelligence = {
     created_at?: string;
     sample_size?: number;
   };
+};
+
+type SourceFeedFormState = {
+  feed_url: string;
+  feed_type: "rss" | "homepage" | "manual";
+  title: string;
+  language: string;
+  country: string;
+  status: "active" | "paused";
+  fetch_interval_minutes: string;
+};
+
+const EMPTY_FEED_FORM: SourceFeedFormState = {
+  feed_url: "",
+  feed_type: "rss",
+  title: "",
+  language: "",
+  country: "",
+  status: "active",
+  fetch_interval_minutes: "60",
 };
 
 function phase2SourceToDetail(data: any): SourceDetail {
@@ -361,6 +382,7 @@ function ProviderStrip({ metadata }: { metadata: any }) {
 export function SourceDetailClient({ sourceId }: { sourceId: string }) {
   const [detail, setDetail] = useState<SourceDetail | null>(null);
   const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
   const [adminKey, setAdminKey] = useState("");
   const [actionLoading, setActionLoading] = useState("");
   const [sourceIntelligence, setSourceIntelligence] = useState<SourceIntelligence | null>(null);
@@ -368,6 +390,9 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
   const [opsAlerts, setOpsAlerts] = useState<OpsAlert[]>([]);
   const [opsSummary, setOpsSummary] = useState<any>(null);
   const [deliveryResult, setDeliveryResult] = useState<any>(null);
+  const [feedForm, setFeedForm] = useState<SourceFeedFormState>(EMPTY_FEED_FORM);
+  const [feedResult, setFeedResult] = useState<any>(null);
+  const [syncResult, setSyncResult] = useState<any>(null);
 
   async function loadSourceIntelligence(mounted = true) {
     setIntelligenceLoading(true);
@@ -424,6 +449,10 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
     return key ? { "X-Parallax-Admin-Key": key } : {};
   }
 
+  function updateFeedForm(field: keyof SourceFeedFormState, value: string) {
+    setFeedForm((current) => ({ ...current, [field]: value }) as SourceFeedFormState);
+  }
+
   async function loadOpsAlerts() {
     if (!adminKey.trim()) return;
     const data = await apiGet(
@@ -436,17 +465,17 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
 
   async function runAdminAction(label: string, action: () => Promise<unknown>) {
     if (!adminKey.trim()) {
-      setError("Admin key is required for source governance actions.");
+      setActionError("Admin key is required for source governance actions.");
       return;
     }
     setActionLoading(label);
-    setError("");
+    setActionError("");
     try {
       await action();
       await loadDetail(true);
       await loadOpsAlerts();
     } catch (err: any) {
-      setError(err?.message || "Could not complete source governance action.");
+      setActionError(err?.message || "Could not complete source governance action.");
     } finally {
       setActionLoading("");
     }
@@ -486,6 +515,43 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
         adminHeaders()
       )
     );
+  }
+
+  async function createSourceFeed(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const feedUrl = feedForm.feed_url.trim();
+    if (!feedUrl) {
+      setActionError("Feed URL is required.");
+      return;
+    }
+    await runAdminAction("create-feed", async () => {
+      const result = await apiPost(
+        `/api/v1/sources/${encodeURIComponent(sourceId)}/feeds`,
+        {
+          feed_url: feedUrl,
+          feed_type: feedForm.feed_type,
+          title: feedForm.title.trim() || undefined,
+          language: feedForm.language.trim() || undefined,
+          country: feedForm.country.trim() || undefined,
+          status: feedForm.status,
+          fetch_interval_minutes: Number(feedForm.fetch_interval_minutes) || 60,
+        },
+        adminHeaders()
+      );
+      setFeedResult(result);
+      setFeedForm(EMPTY_FEED_FORM);
+    });
+  }
+
+  async function syncSourceNow() {
+    await runAdminAction("sync-source", async () => {
+      const result = await apiPost(
+        `/api/v1/sources/${encodeURIComponent(sourceId)}/sync?limit=10&card_limit=10`,
+        {},
+        adminHeaders()
+      );
+      setSyncResult(result);
+    });
   }
 
   async function evaluateSourceOpsAlerts() {
@@ -613,6 +679,12 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
         </div>
       </article>
 
+      {actionError && (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+          {actionError}
+        </div>
+      )}
+
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Metric label="Signals" value={detail.metrics.signal_count} />
         <Metric label="Articles 24h" value={detail.health?.articles_24h || 0} />
@@ -646,6 +718,44 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
             <p className="rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700">
               {detail.health.recommendation}
             </p>
+          )}
+          {canGovernSource && (
+            <button
+              onClick={syncSourceNow}
+              disabled={Boolean(actionLoading) || !adminKey.trim()}
+              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <RefreshCw aria-hidden="true" className="h-4 w-4" />
+              {actionLoading === "sync-source" ? "Syncing..." : "Sync source"}
+            </button>
+          )}
+          {syncResult && (
+            <div className="space-y-3 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700">
+              <div className="grid gap-2 sm:grid-cols-4">
+                <span>{syncResult.synced_feed_count || 0} synced</span>
+                <span>{syncResult.skipped_feed_count || 0} skipped</span>
+                <span>{syncResult.article_count || 0} articles</span>
+                <span>{syncResult.error_count || 0} errors</span>
+              </div>
+              {syncResult.skipped_feeds?.length > 0 && (
+                <div className="grid gap-2">
+                  {syncResult.skipped_feeds.map((feed: any) => (
+                    <p key={feed.feed_id || feed.feed_url} className="rounded-lg bg-white p-2 text-xs leading-5 text-slate-600">
+                      {feed.feed_type}: {feed.reason}
+                    </p>
+                  ))}
+                </div>
+              )}
+              {syncResult.errors?.length > 0 && (
+                <div className="grid gap-2">
+                  {syncResult.errors.map((item: any) => (
+                    <p key={item.feed_id || item.feed_url} className="rounded-lg bg-rose-50 p-2 text-xs leading-5 text-rose-700">
+                      {item.feed_type || "feed"}: {item.error}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </Section>
@@ -901,10 +1011,104 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
         </Section>
       ) : null}
 
-      {detail.feeds?.length ? (
+      {detail.feeds?.length || canGovernSource ? (
         <Section title="Feeds">
           <div className="space-y-3">
-            {detail.feeds.map((feed) => (
+            {canGovernSource && (
+              <form onSubmit={createSourceFeed} className="grid gap-3 rounded-lg border border-slate-200 bg-white p-3">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="grid gap-1 text-xs font-medium text-slate-600">
+                    Feed URL
+                    <input
+                      value={feedForm.feed_url}
+                      onChange={(event) => updateFeedForm("feed_url", event.target.value)}
+                      placeholder="https://example.com/rss.xml"
+                      className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-slate-500"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs font-medium text-slate-600">
+                    Feed type
+                    <select
+                      value={feedForm.feed_type}
+                      onChange={(event) => updateFeedForm("feed_type", event.target.value)}
+                      className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-slate-500"
+                    >
+                      <option value="rss">RSS</option>
+                      <option value="homepage">Homepage</option>
+                      <option value="manual">Manual</option>
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-xs font-medium text-slate-600">
+                    Title
+                    <input
+                      value={feedForm.title}
+                      onChange={(event) => updateFeedForm("title", event.target.value)}
+                      placeholder="Main feed"
+                      className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-slate-500"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs font-medium text-slate-600">
+                    Status
+                    <select
+                      value={feedForm.status}
+                      onChange={(event) => updateFeedForm("status", event.target.value)}
+                      className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-slate-500"
+                    >
+                      <option value="active">Active</option>
+                      <option value="paused">Paused</option>
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-xs font-medium text-slate-600">
+                    Language
+                    <input
+                      value={feedForm.language}
+                      onChange={(event) => updateFeedForm("language", event.target.value)}
+                      placeholder="English"
+                      className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-slate-500"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs font-medium text-slate-600">
+                    Country
+                    <input
+                      value={feedForm.country}
+                      onChange={(event) => updateFeedForm("country", event.target.value)}
+                      placeholder="United States"
+                      className="min-h-10 rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-slate-500"
+                    />
+                  </label>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="grid gap-1 text-xs font-medium text-slate-600">
+                    Interval
+                    <input
+                      value={feedForm.fetch_interval_minutes}
+                      onChange={(event) => updateFeedForm("fetch_interval_minutes", event.target.value)}
+                      type="number"
+                      min="15"
+                      max="1440"
+                      className="min-h-10 w-28 rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-900 outline-none focus:border-slate-500"
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    disabled={Boolean(actionLoading) || !adminKey.trim()}
+                    className="mt-5 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Plus aria-hidden="true" className="h-4 w-4" />
+                    {actionLoading === "create-feed" ? "Adding..." : "Add feed"}
+                  </button>
+                </div>
+                {feedResult?.feed && (
+                  <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">
+                    Added {feedResult.feed.feed_type} feed.
+                  </p>
+                )}
+              </form>
+            )}
+            {detail.feeds?.length ? null : (
+              <p className="text-sm text-slate-500">No feeds available.</p>
+            )}
+            {detail.feeds?.map((feed) => (
               <article key={feed.id} className="rounded-lg bg-slate-50 p-3">
                 <div className="flex flex-wrap gap-2">
                   <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
@@ -964,6 +1168,8 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
                 <p className="mt-2 text-sm text-slate-700">{formatDateTime(run.started_at)}</p>
                 <div className="mt-2 grid gap-1 text-xs leading-5 text-slate-600 sm:grid-cols-2">
                   <span>Feeds: {run.synced_feed_count}/{run.feed_count}</span>
+                  <span>Syncable: {run.summary?.syncable_feed_count ?? run.synced_feed_count}</span>
+                  <span>Skipped: {run.summary?.skipped_feed_count || 0}</span>
                   <span>Articles: {run.article_count}</span>
                   <span>Cards: {run.card_count}</span>
                   <span>Errors: {run.error_count}</span>
