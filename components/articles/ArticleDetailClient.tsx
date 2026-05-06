@@ -294,7 +294,7 @@ export function ArticleDetailClient({ articleId }: { articleId: string }) {
           </a>
           <p className="mt-3 text-sm leading-6 text-slate-600">
             The compare view retrieves similar ingested articles and separates shared claims, unique claims, framing,
-            source, tone, and timeline differences.
+            missing and added claims, title emphasis, source, tone, timeline, and coverage-gap signals.
           </p>
         </Section>
       </div>

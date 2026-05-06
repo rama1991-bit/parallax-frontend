@@ -91,6 +91,187 @@ function ArticleSide({ label, article }: { label: string; article: any }) {
   );
 }
 
+function TitleDifferenceList({ items }: { items: any[] }) {
+  if (!items?.length) return <p className="text-sm text-slate-500">No title differences detected.</p>;
+
+  return (
+    <div className="space-y-3">
+      {items.slice(0, 6).map((item: any, index: number) => {
+        const baseTerms = Array.isArray(item.base_terms) ? item.base_terms : [];
+        const comparisonTerms = Array.isArray(item.comparison_terms) ? item.comparison_terms : [];
+        return (
+          <article key={`${item.comparison_article_id || index}-title`} className="rounded-2xl bg-slate-50 p-3">
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                {Math.round((item.title_similarity || 0) * 100)}% title overlap
+              </span>
+            </div>
+            <p className="mt-3 text-xs font-medium uppercase tracking-wide text-slate-500">Base</p>
+            <p className="mt-1 text-sm leading-6 text-slate-800">{item.base_title || "Untitled"}</p>
+            <p className="mt-3 text-xs font-medium uppercase tracking-wide text-slate-500">Match</p>
+            <p className="mt-1 text-sm leading-6 text-slate-800">{item.comparison_title || "Untitled"}</p>
+            {(baseTerms.length > 0 || comparisonTerms.length > 0) && (
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div>
+                  <p className="mb-2 text-xs font-medium text-slate-500">Base emphasis</p>
+                  <TagList items={baseTerms} />
+                </div>
+                <div>
+                  <p className="mb-2 text-xs font-medium text-slate-500">Match emphasis</p>
+                  <TagList items={comparisonTerms} />
+                </div>
+              </div>
+            )}
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function ClaimGroupCards({ groups, empty }: { groups: any[]; empty: string }) {
+  if (!groups?.length) return <p className="text-sm text-slate-500">{empty}</p>;
+
+  return (
+    <div className="space-y-3">
+      {groups.slice(0, 8).map((group: any, index: number) => {
+        const claims = Array.isArray(group.claims) ? group.claims : [];
+        return (
+          <article key={`${group.comparison_article_id || group.article_id || index}-claims`} className="rounded-2xl bg-slate-50 p-3">
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                {group.comparison_source || group.source || "Unknown source"}
+              </span>
+              {claims.length > 0 && (
+                <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                  {claims.length} claims
+                </span>
+              )}
+            </div>
+            {claims.length ? (
+              <ul className="mt-3 space-y-2">
+                {claims.slice(0, 6).map((claim: string, claimIndex: number) => (
+                  <li key={`${claim}-${claimIndex}`} className="text-sm leading-6 text-slate-700">
+                    {claim}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm text-slate-500">No claims listed.</p>
+            )}
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function CoverageGapList({ items }: { items: any[] }) {
+  if (!items?.length) return <p className="text-sm text-slate-500">No coverage gaps detected in the selected matches.</p>;
+
+  return (
+    <div className="space-y-3">
+      {items.slice(0, 8).map((item: any, index: number) => (
+        <article key={`${item.comparison_article_id || index}-${item.type}`} className="rounded-2xl bg-amber-50 p-3">
+          <div className="flex flex-wrap gap-2">
+            <span className="rounded-full bg-white px-2 py-1 text-xs text-amber-800">
+              {item.type || "coverage_gap"}
+            </span>
+            {item.source && (
+              <span className="rounded-full bg-white px-2 py-1 text-xs text-amber-800">
+                {item.source}
+              </span>
+            )}
+          </div>
+          <p className="mt-3 text-sm leading-6 text-amber-900">{item.reason || "Additional comparison context is needed."}</p>
+          {Array.isArray(item.claims) && item.claims.length > 0 && (
+            <ul className="mt-3 space-y-2">
+              {item.claims.slice(0, 4).map((claim: string, claimIndex: number) => (
+                <li key={`${claim}-${claimIndex}`} className="text-sm leading-6 text-amber-900">
+                  {claim}
+                </li>
+              ))}
+            </ul>
+          )}
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function TimelineList({ items }: { items: any[] }) {
+  if (!items?.length) return <p className="text-sm text-slate-500">No timeline differences available.</p>;
+
+  return (
+    <div className="space-y-3">
+      {items.slice(0, 8).map((item: any, index: number) => (
+        <article key={`${item.comparison_published_at || index}-timeline`} className="rounded-2xl bg-slate-50 p-3">
+          <div className="flex flex-wrap gap-2">
+            <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+              {item.direction || "unknown"}
+            </span>
+            <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+              {item.difference_hours === null || item.difference_hours === undefined ? "unknown hours" : `${item.difference_hours}h`}
+            </span>
+          </div>
+          <dl className="mt-3 grid gap-2 text-xs text-slate-600">
+            <div>
+              <dt className="font-medium text-slate-500">Base</dt>
+              <dd className="break-words">{item.base_published_at || "Unknown"}</dd>
+            </div>
+            <div>
+              <dt className="font-medium text-slate-500">Match</dt>
+              <dd className="break-words">{item.comparison_published_at || "Unknown"}</dd>
+            </div>
+          </dl>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function SourceDifferenceList({ items }: { items: any[] }) {
+  if (!items?.length) return <p className="text-sm text-slate-500">No source differences available.</p>;
+
+  return (
+    <div className="space-y-3">
+      {items.slice(0, 8).map((item: any, index: number) => {
+        const base = item.base_source || {};
+        const comparison = item.comparison_source || {};
+        const differences = Array.isArray(item.differences) ? item.differences : [];
+        return (
+          <article key={`${comparison.id || index}-source`} className="rounded-2xl bg-slate-50 p-3">
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                {item.same_source ? "same source" : "different source"}
+              </span>
+              <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                {item.source_contrast || differences.join(" / ") || "metadata match"}
+              </span>
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <div>
+                <p className="text-xs font-medium text-slate-500">Base</p>
+                <p className="mt-1 text-sm font-medium text-slate-900">{base.name || "Unknown source"}</p>
+                <p className="text-xs leading-5 text-slate-600">
+                  {[base.country, base.language, base.source_type, base.source_size].filter(Boolean).join(" / ") || "No metadata"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-slate-500">Match</p>
+                <p className="mt-1 text-sm font-medium text-slate-900">{comparison.name || "Unknown source"}</p>
+                <p className="text-xs leading-5 text-slate-600">
+                  {[comparison.country, comparison.language, comparison.source_type, comparison.source_size].filter(Boolean).join(" / ") || "No metadata"}
+                </p>
+              </div>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
 export function CompareClient() {
   const searchParams = useSearchParams();
   const articleId = searchParams.get("articleId") || "";
@@ -175,7 +356,13 @@ export function CompareClient() {
         right_only: result?.comparison?.framing_differences?.flatMap((item: any) => item.comparison_only || []) || [],
       }
     : result?.framing || {};
-  const entities = result?.entities || { shared: [] };
+  const entities = result?.entities || result?.comparison?.entities || { shared: [] };
+  const titleDifferences = isArticleCompare ? result?.comparison?.title_differences || [] : [];
+  const missingClaims = isArticleCompare ? result?.comparison?.missing_claims || [] : [];
+  const addedClaims = isArticleCompare ? result?.comparison?.added_claims || [] : [];
+  const coverageGaps = isArticleCompare ? result?.comparison?.coverage_gaps || [] : [];
+  const timelineItems = isArticleCompare ? result?.comparison?.timeline_difference || [] : [];
+  const sourceItems = isArticleCompare ? result?.comparison?.source_difference || [] : [];
 
   return (
     <main className="mx-auto max-w-4xl space-y-4 p-4 pb-24 md:p-6">
@@ -294,6 +481,17 @@ export function CompareClient() {
             </Section>
           )}
 
+          {isArticleCompare && (
+            <div className="grid gap-4 md:grid-cols-2">
+              <Section title="Title Differences">
+                <TitleDifferenceList items={titleDifferences} />
+              </Section>
+              <Section title="Coverage Gaps">
+                <CoverageGapList items={coverageGaps} />
+              </Section>
+            </div>
+          )}
+
           <div className="grid gap-3 md:grid-cols-2">
             <div className="rounded-3xl border border-slate-200 bg-white p-5">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
@@ -346,6 +544,17 @@ export function CompareClient() {
             </Section>
           </div>
 
+          {isArticleCompare && (
+            <div className="grid gap-4 md:grid-cols-2">
+              <Section title="Missing Claims">
+                <ClaimGroupCards groups={missingClaims} empty="No base claims are missing from the selected matches." />
+              </Section>
+              <Section title="Added Claims">
+                <ClaimGroupCards groups={addedClaims} empty="No added comparison claims detected." />
+              </Section>
+            </div>
+          )}
+
           <Section title="Framing">
             <div className="grid gap-4 md:grid-cols-3">
               <div>
@@ -376,10 +585,10 @@ export function CompareClient() {
           {isArticleCompare && (
             <div className="grid gap-4 md:grid-cols-2">
               <Section title="Timeline">
-                <pre className="overflow-x-auto rounded-2xl bg-slate-50 p-3 text-xs text-slate-600">{JSON.stringify(result.comparison.timeline_difference || [], null, 2)}</pre>
+                <TimelineList items={timelineItems} />
               </Section>
               <Section title="Source Difference">
-                <pre className="overflow-x-auto rounded-2xl bg-slate-50 p-3 text-xs text-slate-600">{JSON.stringify(result.comparison.source_difference || [], null, 2)}</pre>
+                <SourceDifferenceList items={sourceItems} />
               </Section>
             </div>
           )}
