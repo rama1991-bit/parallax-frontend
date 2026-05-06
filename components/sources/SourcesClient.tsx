@@ -571,7 +571,7 @@ export function SourcesClient() {
 
         {syncResult && (
           <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700">
-            Synced {syncResult.synced_feed_count || 0} feeds, saved {syncResult.article_count || 0} articles, created {syncResult.card_count || 0} cards, with {syncResult.error_count || 0} errors.
+            Synced {syncResult.synced_feed_count || 0} fetchable feeds, skipped {syncResult.skipped_feed_count || 0} manual feeds, saved {syncResult.article_count || 0} articles, created {syncResult.card_count || 0} cards, with {syncResult.error_count || 0} errors.
             {syncResult.sync_run_id ? ` Run ${syncResult.sync_run_id}.` : ""}
           </p>
         )}
