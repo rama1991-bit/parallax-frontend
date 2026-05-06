@@ -393,6 +393,7 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
   const [feedForm, setFeedForm] = useState<SourceFeedFormState>(EMPTY_FEED_FORM);
   const [feedResult, setFeedResult] = useState<any>(null);
   const [syncResult, setSyncResult] = useState<any>(null);
+  const [pendingAnalysisResult, setPendingAnalysisResult] = useState<any>(null);
 
   async function loadSourceIntelligence(mounted = true) {
     setIntelligenceLoading(true);
@@ -551,6 +552,17 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
         adminHeaders()
       );
       setSyncResult(result);
+    });
+  }
+
+  async function analyzeSourcePending() {
+    await runAdminAction("analyze-pending", async () => {
+      const result = await apiPost(
+        `/api/v1/sources/articles/analyze-pending?source_id=${encodeURIComponent(sourceId)}&limit=10`,
+        {},
+        adminHeaders()
+      );
+      setPendingAnalysisResult(result);
     });
   }
 
@@ -720,14 +732,24 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
             </p>
           )}
           {canGovernSource && (
-            <button
-              onClick={syncSourceNow}
-              disabled={Boolean(actionLoading) || !adminKey.trim()}
-              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <RefreshCw aria-hidden="true" className="h-4 w-4" />
-              {actionLoading === "sync-source" ? "Syncing..." : "Sync source"}
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={syncSourceNow}
+                disabled={Boolean(actionLoading) || !adminKey.trim()}
+                className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RefreshCw aria-hidden="true" className="h-4 w-4" />
+                {actionLoading === "sync-source" ? "Syncing..." : "Sync source"}
+              </button>
+              <button
+                onClick={analyzeSourcePending}
+                disabled={Boolean(actionLoading) || !adminKey.trim()}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Activity aria-hidden="true" className="h-4 w-4" />
+                {actionLoading === "analyze-pending" ? "Analyzing..." : "Analyze pending"}
+              </button>
+            </div>
           )}
           {syncResult && (
             <div className="space-y-3 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700">
@@ -755,6 +777,11 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+          {pendingAnalysisResult && (
+            <div className="rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700">
+              Analyzed {pendingAnalysisResult.analyzed_count || 0} pending articles from {pendingAnalysisResult.candidate_count || 0} candidates, with {pendingAnalysisResult.failed_count || 0} failures.
             </div>
           )}
         </div>

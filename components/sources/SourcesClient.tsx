@@ -205,6 +205,7 @@ export function SourcesClient() {
   const [defaultPreview, setDefaultPreview] = useState<any>(null);
   const [seedResult, setSeedResult] = useState<any>(null);
   const [syncResult, setSyncResult] = useState<any>(null);
+  const [pendingAnalysisResult, setPendingAnalysisResult] = useState<any>(null);
   const [intelligenceResult, setIntelligenceResult] = useState<any>(null);
   const [intelligenceRuns, setIntelligenceRuns] = useState<any[]>([]);
   const [clusterResult, setClusterResult] = useState<any>(null);
@@ -219,6 +220,7 @@ export function SourcesClient() {
   const [seeding, setSeeding] = useState(false);
   const [creatingSource, setCreatingSource] = useState(false);
   const [syncingActive, setSyncingActive] = useState(false);
+  const [analyzingPending, setAnalyzingPending] = useState(false);
   const [refreshingIntelligence, setRefreshingIntelligence] = useState(false);
   const [refreshingClusters, setRefreshingClusters] = useState(false);
   const [runningPipeline, setRunningPipeline] = useState(false);
@@ -391,6 +393,29 @@ export function SourcesClient() {
     }
   }
 
+  async function analyzePendingArticles() {
+    if (ADMIN_CONTROLS_ENABLED && !adminKey.trim()) {
+      setError("Admin key is required for pending article analysis.");
+      return;
+    }
+    setAnalyzingPending(true);
+    setError("");
+
+    try {
+      const result = await apiPost(
+        "/api/v1/sources/articles/analyze-pending?limit=25",
+        {},
+        adminHeaders()
+      );
+      setPendingAnalysisResult(result);
+      await loadSources();
+    } catch (err: any) {
+      setError(err?.message || "Could not analyze pending articles.");
+    } finally {
+      setAnalyzingPending(false);
+    }
+  }
+
   async function refreshIntelligence() {
     if (ADMIN_CONTROLS_ENABLED && !adminKey.trim()) {
       setError("Admin key is required for intelligence refresh.");
@@ -453,7 +478,7 @@ export function SourcesClient() {
 
     try {
       const result = await apiPost(
-        "/api/v1/intelligence/pipeline/run?source_limit=25&feed_limit=50&sync_article_limit=5&sync_card_limit=15&intelligence_source_limit=50&topic_limit=50&intelligence_article_limit=100&intelligence_card_limit=50&cluster_article_limit=250&cluster_limit=100&cluster_card_limit=50",
+        "/api/v1/intelligence/pipeline/run?source_limit=25&feed_limit=50&sync_article_limit=5&sync_card_limit=15&analysis_article_limit=25&intelligence_source_limit=50&topic_limit=50&intelligence_article_limit=100&intelligence_card_limit=50&cluster_article_limit=250&cluster_limit=100&cluster_card_limit=50",
         {},
         adminHeaders()
       );
@@ -585,6 +610,14 @@ export function SourcesClient() {
                   {runningPipeline ? "Running..." : "Run pipeline"}
                 </button>
                 <button
+                  onClick={analyzePendingArticles}
+                  disabled={analyzingPending || !sourceRecords.length || !adminKey.trim()}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Activity aria-hidden="true" className="h-4 w-4" />
+                  {analyzingPending ? "Analyzing..." : "Analyze pending"}
+                </button>
+                <button
                   onClick={evaluateOpsAlerts}
                   disabled={evaluatingOps || !sourceRecords.length || !adminKey.trim()}
                   className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
@@ -673,6 +706,12 @@ export function SourcesClient() {
           </p>
         )}
 
+        {pendingAnalysisResult && (
+          <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700">
+            Analyzed {pendingAnalysisResult.analyzed_count || 0} pending articles from {pendingAnalysisResult.candidate_count || 0} candidates, with {pendingAnalysisResult.failed_count || 0} failures.
+          </p>
+        )}
+
         {intelligenceResult && (
           <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700">
             Refreshed {intelligenceResult.snapshot_count || 0} intelligence snapshots, created {intelligenceResult.card_count || 0} feed cards, with {intelligenceResult.error_count || 0} errors.
@@ -716,13 +755,13 @@ export function SourcesClient() {
         {pipelineResult && (
           <div className="mt-3 space-y-2 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700">
             <p>
-              Pipeline {pipelineResult.status}: {pipelineResult.summary?.completed_phase_count || 0} phases completed, {pipelineResult.summary?.feed_card_count || 0} cards, {pipelineResult.summary?.cluster_count || 0} clusters, {pipelineResult.summary?.error_count || 0} errors.
+              Pipeline {pipelineResult.status}: {pipelineResult.summary?.completed_phase_count || 0} phases completed, {pipelineResult.summary?.feed_card_count || 0} cards, {pipelineResult.summary?.analyzed_article_count || 0} analyzed, {pipelineResult.summary?.cluster_count || 0} clusters, {pipelineResult.summary?.error_count || 0} errors.
             </p>
-            {(pipelineResult.phases || []).slice(0, 3).map((phase: any) => (
+            {(pipelineResult.phases || []).slice(0, 4).map((phase: any) => (
               <div key={phase.name} className="grid gap-1 text-xs leading-5 text-slate-600 sm:grid-cols-4">
                 <span className="font-medium text-slate-900">{phase.name}</span>
                 <span>{phase.status}</span>
-                <span>{phase.card_count || phase.snapshot_count || phase.cluster_count || 0} outputs</span>
+                <span>{phase.card_count || phase.snapshot_count || phase.cluster_count || phase.article_count || 0} outputs</span>
                 <span>{phase.run_id || "no run"}</span>
               </div>
             ))}
