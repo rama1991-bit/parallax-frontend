@@ -735,6 +735,8 @@ export function SourcesClient() {
         {clusterResult && (
           <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700">
             Refreshed {clusterResult.cluster_count || 0} event clusters from {clusterResult.article_count || 0} articles, created {clusterResult.card_count || 0} feed cards, with {clusterResult.error_count || 0} errors.
+            {clusterResult.run?.summary?.cross_language_cluster_count !== undefined ? ` Cross-language ${clusterResult.run.summary.cross_language_cluster_count}.` : ""}
+            {clusterResult.run?.summary?.average_cluster_quality !== undefined ? ` Avg quality ${Math.round((clusterResult.run.summary.average_cluster_quality || 0) * 100)}%.` : ""}
             {clusterResult.run?.id ? ` Run ${clusterResult.run.id}.` : ""}
           </p>
         )}

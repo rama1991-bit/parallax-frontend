@@ -52,6 +52,12 @@ function ProviderStrip({ metadata }: { metadata: any }) {
   );
 }
 
+function percentLabel(value: any) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "Unknown";
+  return `${Math.round(number * 100)}%`;
+}
+
 function ArticleSide({ label, article }: { label: string; article: any }) {
   const sourceLabel =
     article.domain ||
@@ -445,12 +451,28 @@ export function CompareClient() {
                   <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700">
                     {(result.event_cluster.languages || []).length} languages
                   </span>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700">
+                    {percentLabel(result.event_cluster.cluster_quality?.quality_score)} quality
+                  </span>
+                  {result.event_cluster.source_diversity?.cross_language && (
+                    <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-800">
+                      cross-language
+                    </span>
+                  )}
                 </div>
                 <div>
                   <h3 className="text-base font-semibold leading-6 text-slate-950">{result.event_cluster.title}</h3>
                   <p className="mt-2 text-sm leading-6 text-slate-700">{result.event_cluster.summary}</p>
                 </div>
                 <TagList items={[...(result.event_cluster.frames || []), ...(result.event_cluster.languages || [])].slice(0, 10)} />
+                {(result.event_cluster.language_bridge_terms || []).length > 0 && (
+                  <div>
+                    <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+                      Language bridge terms
+                    </p>
+                    <TagList items={result.event_cluster.language_bridge_terms || []} />
+                  </div>
+                )}
               </div>
             </Section>
           )}
