@@ -183,6 +183,17 @@ function deliveryLabel(status?: string) {
   return (status || "not_sent").replace(/_/g, " ");
 }
 
+function validationStyles(status?: string) {
+  if (status === "validated") return "bg-emerald-50 text-emerald-800";
+  if (status === "failed") return "bg-rose-50 text-rose-700";
+  if (status === "needs_review") return "bg-amber-50 text-amber-800";
+  return "bg-slate-100 text-slate-700";
+}
+
+function validationLabel(status?: string) {
+  return (status || "not_validated").replace(/_/g, " ");
+}
+
 function HealthBadge({ health }: { health?: SourceHealth }) {
   const label = health?.label || "Needs review";
   return (
@@ -240,7 +251,10 @@ export function SourcesClient() {
   const [creatingSource, setCreatingSource] = useState(false);
   const [resolvingDraft, setResolvingDraft] = useState(false);
   const [discoveringSources, setDiscoveringSources] = useState(false);
+  const [validatingCandidateId, setValidatingCandidateId] = useState("");
   const [sourceDiscoveryResult, setSourceDiscoveryResult] = useState<any>(null);
+  const [selectedDiscoveryCandidate, setSelectedDiscoveryCandidate] = useState<any>(null);
+  const [allowUnvalidatedCreate, setAllowUnvalidatedCreate] = useState(false);
   const [syncAfterCreate, setSyncAfterCreate] = useState(false);
   const [syncingActive, setSyncingActive] = useState(false);
   const [analyzingPending, setAnalyzingPending] = useState(false);
@@ -409,6 +423,12 @@ export function SourcesClient() {
       setError("Website URL is required for homepage sources.");
       return;
     }
+    const selectedValidationStatus =
+      selectedDiscoveryCandidate?.validation_status || selectedDiscoveryCandidate?.validation?.status;
+    if (selectedDiscoveryCandidate && selectedValidationStatus !== "validated" && !allowUnvalidatedCreate) {
+      setError("Validate the selected source candidate before adding it, or enable validation override.");
+      return;
+    }
 
     setCreatingSource(true);
     setError("");
@@ -442,6 +462,7 @@ export function SourcesClient() {
                 source_type: sourceForm.source_type || undefined,
                 feed_type: feedType,
                 credibility_notes: sourceForm.credibility_notes.trim() || undefined,
+                discovery_candidate: selectedDiscoveryCandidate || undefined,
               }
             : undefined,
         },
@@ -456,6 +477,34 @@ export function SourcesClient() {
             adminHeaders()
           );
           finalResult = { ...result, immediate_sync_result: immediateSync };
+          try {
+            const intelligenceRefresh = await apiPost(
+              `/api/v1/sources/${encodeURIComponent(result.source.id)}/intelligence/refresh?limit=50`,
+              {},
+              adminHeaders()
+            );
+            finalResult = { ...finalResult, immediate_intelligence_result: intelligenceRefresh };
+          } catch (intelligenceErr: any) {
+            finalResult = {
+              ...finalResult,
+              immediate_intelligence_error: intelligenceErr?.message || "Immediate source intelligence refresh failed.",
+            };
+          }
+          if (sourceDraft?.cluster_id) {
+            try {
+              const clusterRefresh = await apiPost(
+                "/api/v1/intelligence/clusters/refresh?article_limit=100&cluster_limit=50&card_limit=20",
+                {},
+                adminHeaders()
+              );
+              finalResult = { ...finalResult, immediate_cluster_refresh_result: clusterRefresh };
+            } catch (clusterErr: any) {
+              finalResult = {
+                ...finalResult,
+                immediate_cluster_refresh_error: clusterErr?.message || "Immediate cluster refresh failed.",
+              };
+            }
+          }
         } catch (syncErr: any) {
           finalResult = { ...result, immediate_sync_error: syncErr?.message || "Immediate source sync failed." };
         }
@@ -464,6 +513,8 @@ export function SourcesClient() {
       if (result?.draft_resolution?.source_candidate) {
         setSourceDraft(result.draft_resolution.source_candidate);
       }
+      setSelectedDiscoveryCandidate(null);
+      setAllowUnvalidatedCreate(false);
       setSourceForm(EMPTY_SOURCE_FORM);
       await loadSources();
     } catch (err: any) {
@@ -501,6 +552,8 @@ export function SourcesClient() {
         adminHeaders()
       );
       setSourceDiscoveryResult(result);
+      setSelectedDiscoveryCandidate(null);
+      setAllowUnvalidatedCreate(false);
     } catch (err: any) {
       setError(err?.message || "Could not discover source candidates.");
     } finally {
@@ -530,11 +583,51 @@ export function SourcesClient() {
       credibility_notes: payload.credibility_notes || candidate?.credibility_notes || current.credibility_notes,
     }));
     setSyncAfterCreate(feedType !== "manual");
+    setSelectedDiscoveryCandidate(candidate);
+    setAllowUnvalidatedCreate(false);
     setSourceCreateResult((current: any) => ({
       ...(current || {}),
       discovery_candidate: candidate,
       draft: sourceDraft,
     }));
+  }
+
+  async function validateDiscoveredCandidate(candidate: any, selectAfterValidation = false) {
+    if (ADMIN_CONTROLS_ENABLED && !adminKey.trim()) {
+      setError("Admin key is required for source validation.");
+      return;
+    }
+    setValidatingCandidateId(candidate?.id || candidate?.website_url || "candidate");
+    setError("");
+
+    try {
+      const result = await apiPost(
+        "/api/v1/sources/discover/validate?limit=5",
+        { candidate, allow_homepage_fallback: true },
+        adminHeaders()
+      );
+      const enrichedCandidate = result?.candidate || candidate;
+      setSourceDiscoveryResult((current: any) => ({
+        ...(current || {}),
+        candidates: (current?.candidates || []).map((item: any) =>
+          (item.id || item.website_url) === (candidate.id || candidate.website_url) ? enrichedCandidate : item
+        ),
+        latest_validation: result,
+      }));
+      if (
+        (selectedDiscoveryCandidate?.id || selectedDiscoveryCandidate?.website_url) ===
+        (candidate?.id || candidate?.website_url)
+      ) {
+        setSelectedDiscoveryCandidate(enrichedCandidate);
+      }
+      if (selectAfterValidation) {
+        useDiscoveredCandidate(enrichedCandidate);
+      }
+    } catch (err: any) {
+      setError(err?.message || "Could not validate source candidate.");
+    } finally {
+      setValidatingCandidateId("");
+    }
   }
 
   async function updateDraftResolution(status: "resolved" | "ignored" | "draft") {
@@ -1185,6 +1278,17 @@ export function SourcesClient() {
                 />
                 Sync after add
               </label>
+              {selectedDiscoveryCandidate && (
+                <label className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-amber-200 px-3 py-2 text-xs font-medium text-amber-800">
+                  <input
+                    type="checkbox"
+                    checked={allowUnvalidatedCreate}
+                    onChange={(event) => setAllowUnvalidatedCreate(event.target.checked)}
+                    className="h-4 w-4"
+                  />
+                  Override validation
+                </label>
+              )}
             </div>
             {sourceDraft && (
               <div className="rounded-lg bg-emerald-50 p-3 text-sm leading-6 text-emerald-900">
@@ -1276,6 +1380,9 @@ export function SourcesClient() {
                         <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
                           {scoreLabel(candidate.confidence)}
                         </span>
+                        <span className={`rounded-full px-2 py-1 text-xs capitalize ${validationStyles(candidate.validation_status || candidate.validation?.status)}`}>
+                          {validationLabel(candidate.validation_status || candidate.validation?.status)}
+                        </span>
                         {candidate.existing_source_id && (
                           <span className="rounded-full bg-white px-2 py-1 text-xs text-emerald-800">existing</span>
                         )}
@@ -1287,7 +1394,20 @@ export function SourcesClient() {
                       {candidate.rss_url && (
                         <p className="mt-1 text-xs leading-5 text-slate-500">RSS: {candidate.rss_url}</p>
                       )}
+                      {candidate.validation && (
+                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                          Validation: {candidate.validation.item_count || 0} items from {candidate.validation.selected_feed_type || "no feed"}
+                        </p>
+                      )}
                       <div className="mt-2 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => validateDiscoveredCandidate(candidate)}
+                          disabled={!!validatingCandidateId}
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {validatingCandidateId === (candidate.id || candidate.website_url) ? "Validating..." : "Validate"}
+                        </button>
                         <button
                           type="button"
                           onClick={() => useDiscoveredCandidate(candidate)}
@@ -1295,6 +1415,16 @@ export function SourcesClient() {
                         >
                           Use candidate
                         </button>
+                        {(candidate.validation_status || candidate.validation?.status) !== "validated" && (
+                          <button
+                            type="button"
+                            onClick={() => validateDiscoveredCandidate(candidate, true)}
+                            disabled={!!validatingCandidateId}
+                            className="rounded-lg bg-emerald-900 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Validate and use
+                          </button>
+                        )}
                         {candidate.existing_source_id && (
                           <a
                             href={`/sources/${encodeURIComponent(candidate.existing_source_id)}`}
@@ -1321,9 +1451,29 @@ export function SourcesClient() {
                 {sourceCreateResult.immediate_sync_result.error_count || 0} errors.
               </p>
             )}
+            {sourceCreateResult?.immediate_intelligence_result && (
+              <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+                Source intelligence refreshed with sample size {sourceCreateResult.immediate_intelligence_result.sample_size || 0}.
+              </p>
+            )}
+            {sourceCreateResult?.immediate_cluster_refresh_result && (
+              <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+                Event clusters refreshed with {sourceCreateResult.immediate_cluster_refresh_result.cluster_count || 0} clusters.
+              </p>
+            )}
             {sourceCreateResult?.immediate_sync_error && (
               <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
                 Source was added, but immediate sync failed: {sourceCreateResult.immediate_sync_error}
+              </p>
+            )}
+            {sourceCreateResult?.immediate_intelligence_error && (
+              <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                Source was added, but intelligence refresh failed: {sourceCreateResult.immediate_intelligence_error}
+              </p>
+            )}
+            {sourceCreateResult?.immediate_cluster_refresh_error && (
+              <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                Source was added, but cluster refresh failed: {sourceCreateResult.immediate_cluster_refresh_error}
               </p>
             )}
           </form>
