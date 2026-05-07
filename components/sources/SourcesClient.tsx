@@ -264,6 +264,7 @@ export function SourcesClient() {
   const [sourceDiscoveryRuns, setSourceDiscoveryRuns] = useState<any[]>([]);
   const [sourceValidationRuns, setSourceValidationRuns] = useState<any[]>([]);
   const [sourceOnboardingRuns, setSourceOnboardingRuns] = useState<any[]>([]);
+  const [sourceOnboardingBatches, setSourceOnboardingBatches] = useState<any[]>([]);
   const [opsAlerts, setOpsAlerts] = useState<OpsAlert[]>([]);
   const [opsSummary, setOpsSummary] = useState<any>(null);
   const [sourceForm, setSourceForm] = useState<SourceFormState>(EMPTY_SOURCE_FORM);
@@ -275,9 +276,12 @@ export function SourcesClient() {
   const [discoveringSources, setDiscoveringSources] = useState(false);
   const [validatingCandidateId, setValidatingCandidateId] = useState("");
   const [onboardingCandidateId, setOnboardingCandidateId] = useState("");
+  const [batchOnboarding, setBatchOnboarding] = useState(false);
+  const [retryingOnboardingRunId, setRetryingOnboardingRunId] = useState("");
   const [sourceDiscoveryResult, setSourceDiscoveryResult] = useState<any>(null);
   const [selectedDiscoveryCandidate, setSelectedDiscoveryCandidate] = useState<any>(null);
   const [allowUnvalidatedCreate, setAllowUnvalidatedCreate] = useState(false);
+  const [requireReviewBeforeSync, setRequireReviewBeforeSync] = useState(false);
   const [syncAfterCreate, setSyncAfterCreate] = useState(false);
   const [syncingActive, setSyncingActive] = useState(false);
   const [analyzingPending, setAnalyzingPending] = useState(false);
@@ -407,18 +411,21 @@ export function SourcesClient() {
   async function loadSourceWorkflowRuns() {
     if (!ADMIN_CONTROLS_ENABLED || !adminKey.trim()) return;
     try {
-      const [discoveryData, validationData, onboardingData] = await Promise.all([
+      const [discoveryData, validationData, onboardingData, batchData] = await Promise.all([
         apiGet("/api/v1/sources/discovery-runs?limit=6", adminHeaders()),
         apiGet("/api/v1/sources/validation-runs?limit=6", adminHeaders()),
         apiGet("/api/v1/sources/onboarding-runs?limit=8", adminHeaders()),
+        apiGet("/api/v1/sources/onboarding-batches?limit=6", adminHeaders()),
       ]);
       setSourceDiscoveryRuns(discoveryData?.runs || []);
       setSourceValidationRuns(validationData?.runs || []);
       setSourceOnboardingRuns(onboardingData?.runs || []);
+      setSourceOnboardingBatches(batchData?.batches || []);
     } catch {
       setSourceDiscoveryRuns([]);
       setSourceValidationRuns([]);
       setSourceOnboardingRuns([]);
+      setSourceOnboardingBatches([]);
     }
   }
 
@@ -516,10 +523,19 @@ export function SourcesClient() {
       );
       let finalResult = result;
       if (syncAfterCreate && result?.source?.id && result?.feed?.feed_type && result.feed.feed_type !== "manual") {
-        try {
-          const immediateSync = await apiPost(
-            `/api/v1/sources/${encodeURIComponent(result.source.id)}/sync?limit=5&card_limit=5`,
-            {},
+        if (requireReviewBeforeSync && result?.source?.review_status !== "reviewed") {
+          finalResult = {
+            ...result,
+            immediate_review_gate_result: {
+              status: "needs_review",
+              review_status: result?.source?.review_status || "needs_review",
+            },
+          };
+        } else {
+          try {
+            const immediateSync = await apiPost(
+              `/api/v1/sources/${encodeURIComponent(result.source.id)}/sync?limit=5&card_limit=5`,
+              {},
             adminHeaders()
           );
           finalResult = { ...result, immediate_sync_result: immediateSync };
@@ -551,8 +567,9 @@ export function SourcesClient() {
               };
             }
           }
-        } catch (syncErr: any) {
-          finalResult = { ...result, immediate_sync_error: syncErr?.message || "Immediate source sync failed." };
+          } catch (syncErr: any) {
+            finalResult = { ...result, immediate_sync_error: syncErr?.message || "Immediate source sync failed." };
+          }
         }
       }
       setSourceCreateResult(finalResult);
@@ -721,6 +738,7 @@ export function SourcesClient() {
           analyze_after_sync: true,
           refresh_intelligence: true,
           refresh_clusters: Boolean(sourceDraft?.cluster_id),
+          require_review_before_sync: requireReviewBeforeSync,
         },
         adminHeaders()
       );
@@ -748,6 +766,87 @@ export function SourcesClient() {
       setError(err?.message || "Could not onboard source candidate.");
     } finally {
       setOnboardingCandidateId("");
+    }
+  }
+
+  async function onboardValidatedCandidateBatch() {
+    if (ADMIN_CONTROLS_ENABLED && !adminKey.trim()) {
+      setError("Admin key is required for source batch onboarding.");
+      return;
+    }
+    const candidates = (sourceDiscoveryResult?.candidates || []).filter((candidate: any) => {
+      const status = candidate?.validation_status || candidate?.validation?.status;
+      return status === "validated" || allowUnvalidatedCreate;
+    });
+    if (!candidates.length) {
+      setError("Validate at least one candidate before running batch onboarding.");
+      return;
+    }
+    setBatchOnboarding(true);
+    setError("");
+
+    try {
+      const result = await apiPost(
+        "/api/v1/sources/discover/onboard-batch?limit=6&sync_article_limit=5&sync_card_limit=5&analysis_article_limit=10&intelligence_article_limit=50&cluster_article_limit=100&cluster_limit=50&cluster_card_limit=20",
+        {
+          items: candidates.slice(0, 6).map((candidate: any) => ({
+            candidate,
+            source_payload: candidate?.create_payload || candidate,
+            draft_cluster_id: sourceDraft?.cluster_id || candidate?.cluster_id || undefined,
+            draft_candidate_id: sourceDraft?.candidate_id || candidate?.id || undefined,
+            draft_resolution_notes: "Source batch-onboarded from source manager.",
+          })),
+          allow_unvalidated: allowUnvalidatedCreate,
+          allow_homepage_fallback: true,
+          sync_after_create: true,
+          analyze_after_sync: true,
+          refresh_intelligence: true,
+          refresh_clusters_at_end: Boolean(sourceDraft?.cluster_id),
+          require_review_before_sync: requireReviewBeforeSync,
+          stop_on_error: false,
+        },
+        adminHeaders()
+      );
+      setSourceCreateResult((current: any) => ({
+        ...(current || {}),
+        batch_onboarding_result: result,
+      }));
+      await loadSources();
+      await loadSourceWorkflowRuns();
+    } catch (err: any) {
+      setError(err?.message || "Could not batch onboard source candidates.");
+    } finally {
+      setBatchOnboarding(false);
+    }
+  }
+
+  async function retryOnboardingRun(run: any) {
+    if (ADMIN_CONTROLS_ENABLED && !adminKey.trim()) {
+      setError("Admin key is required for source onboarding retry.");
+      return;
+    }
+    setRetryingOnboardingRunId(run.id);
+    setError("");
+
+    try {
+      const result = await apiPost(
+        `/api/v1/sources/onboarding-runs/${encodeURIComponent(run.id)}/retry`,
+        {
+          require_review_before_sync: requireReviewBeforeSync,
+          refresh_clusters: Boolean(run.cluster_id),
+        },
+        adminHeaders()
+      );
+      setSourceCreateResult((current: any) => ({
+        ...(current || {}),
+        onboarding_retry_result: result,
+      }));
+      await loadSources();
+      await loadSourceWorkflowRuns();
+    } catch (err: any) {
+      setError(err?.message || "Could not retry source onboarding.");
+    } finally {
+      setRetryingOnboardingRunId("");
     }
   }
 
@@ -1399,6 +1498,15 @@ export function SourcesClient() {
                 />
                 Sync after add
               </label>
+              <label className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={requireReviewBeforeSync}
+                  onChange={(event) => setRequireReviewBeforeSync(event.target.checked)}
+                  className="h-4 w-4"
+                />
+                Review gate
+              </label>
               {selectedDiscoveryCandidate && (
                 <label className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-amber-200 px-3 py-2 text-xs font-medium text-amber-800">
                   <input
@@ -1490,6 +1598,20 @@ export function SourcesClient() {
                       run {sourceDiscoveryResult.discovery_run.id.slice(0, 8)}
                     </span>
                   )}
+                  <button
+                    type="button"
+                    onClick={onboardValidatedCandidateBatch}
+                    disabled={
+                      batchOnboarding ||
+                      !(sourceDiscoveryResult.candidates || []).some((candidate: any) => {
+                        const status = candidate?.validation_status || candidate?.validation?.status;
+                        return status === "validated" || allowUnvalidatedCreate;
+                      })
+                    }
+                    className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {batchOnboarding ? "Batch onboarding..." : "Onboard batch"}
+                  </button>
                 </div>
                 {sourceDiscoveryResult.retrieval_mode?.errors?.length > 0 && (
                   <p className="mt-2 text-xs leading-5 text-amber-700">
@@ -1616,10 +1738,55 @@ export function SourcesClient() {
                 </div>
               </div>
             )}
+            {sourceCreateResult?.batch_onboarding_result && (
+              <div className="space-y-2 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700">
+                <div className="flex flex-wrap gap-2">
+                  <span className={`rounded-full px-2 py-1 text-xs capitalize ${workflowStyles(sourceCreateResult.batch_onboarding_result.status)}`}>
+                    batch {sourceCreateResult.batch_onboarding_result.status}
+                  </span>
+                  <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                    {sourceCreateResult.batch_onboarding_result.summary?.source_count || 0} sources
+                  </span>
+                  <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                    {sourceCreateResult.batch_onboarding_result.summary?.review_gate_count || 0} gated
+                  </span>
+                  <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                    {scoreLabel(sourceCreateResult.batch_onboarding_result.summary?.average_coverage_delta_score)} coverage
+                  </span>
+                </div>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {(sourceCreateResult.batch_onboarding_result.items || []).slice(0, 4).map((item: any) => (
+                    <div key={`${item.index}-${item.source_name}`} className="rounded-lg bg-white p-2 text-xs text-slate-600">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-slate-900">{item.source_name || "Candidate"}</span>
+                        <span className={`rounded-full px-2 py-1 capitalize ${workflowStyles(item.status)}`}>
+                          {item.status}
+                        </span>
+                      </div>
+                      <p className="mt-1">
+                        {item.summary?.coverage_delta?.synced_articles || 0} synced /{" "}
+                        {item.summary?.coverage_delta?.analyzed_articles || 0} analyzed
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {sourceCreateResult?.onboarding_retry_result && (
+              <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+                Retry {sourceCreateResult.onboarding_retry_result.status} for run{" "}
+                {sourceCreateResult.onboarding_retry_result.retry_of_run_id?.slice(0, 8)}.
+              </p>
+            )}
             {sourceCreateResult?.immediate_sync_result && (
               <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
                 Immediate sync finished with {sourceCreateResult.immediate_sync_result.article_count || 0} articles and{" "}
                 {sourceCreateResult.immediate_sync_result.error_count || 0} errors.
+              </p>
+            )}
+            {sourceCreateResult?.immediate_review_gate_result && (
+              <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                Source was added, but immediate ingestion is gated until review status is reviewed.
               </p>
             )}
             {sourceCreateResult?.immediate_intelligence_result && (
@@ -1651,7 +1818,7 @@ export function SourcesClient() {
         </section>
       )}
 
-      {ADMIN_CONTROLS_ENABLED && (sourceOnboardingRuns.length > 0 || sourceDiscoveryRuns.length > 0 || sourceValidationRuns.length > 0) && (
+      {ADMIN_CONTROLS_ENABLED && (sourceOnboardingRuns.length > 0 || sourceOnboardingBatches.length > 0 || sourceDiscoveryRuns.length > 0 || sourceValidationRuns.length > 0) && (
         <section className="rounded-lg border border-slate-200 bg-white p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-base font-semibold text-slate-950">Source workflow history</h2>
@@ -1677,6 +1844,16 @@ export function SourcesClient() {
                     <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
                       {formatDateTime(run.created_at)}
                     </span>
+                    {run.status !== "completed" && (
+                      <button
+                        type="button"
+                        onClick={() => retryOnboardingRun(run)}
+                        disabled={!!retryingOnboardingRunId || !adminKey.trim()}
+                        className="rounded-lg bg-white px-2 py-1 text-xs font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {retryingOnboardingRunId === run.id ? "Retrying..." : "Retry"}
+                      </button>
+                    )}
                   </div>
                   <div className="mt-2 grid gap-2 text-xs leading-5 text-slate-600 sm:grid-cols-4">
                     <span>{run.summary?.coverage_delta?.synced_articles || 0} synced</span>
@@ -1693,6 +1870,37 @@ export function SourcesClient() {
                       ))}
                     </div>
                   )}
+                </article>
+              ))}
+              </div>
+            )}
+          {sourceOnboardingBatches.length > 0 && (
+            <div className="mt-4 space-y-2">
+              {sourceOnboardingBatches.slice(0, 4).map((batch) => (
+                <article key={batch.id} className="rounded-lg bg-slate-50 p-3">
+                  <div className="flex flex-wrap gap-2">
+                    <span className={`rounded-full px-2 py-1 text-xs capitalize ${workflowStyles(batch.status)}`}>
+                      batch {batch.status}
+                    </span>
+                    <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                      {batch.candidate_count || 0} candidates
+                    </span>
+                    <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                      {batch.source_count || 0} sources
+                    </span>
+                    <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                      {batch.review_gate_count || 0} gated
+                    </span>
+                    <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                      {formatDateTime(batch.created_at)}
+                    </span>
+                  </div>
+                  <div className="mt-2 grid gap-2 text-xs leading-5 text-slate-600 sm:grid-cols-4">
+                    <span>{batch.completed_count || 0} completed</span>
+                    <span>{batch.partial_count || 0} partial</span>
+                    <span>{batch.failed_count || 0} failed</span>
+                    <span>{scoreLabel(batch.summary?.average_coverage_delta_score)} coverage</span>
+                  </div>
                 </article>
               ))}
             </div>
