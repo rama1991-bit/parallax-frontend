@@ -64,10 +64,35 @@ function percentLabel(value: any) {
 function ClusterAutomation({ automation }: { automation: any }) {
   const tasks = Array.isArray(automation?.coverage_gap_tasks) ? automation.coverage_gap_tasks : [];
   const searches = Array.isArray(automation?.suggested_source_searches) ? automation.suggested_source_searches : [];
-  if (!tasks.length && !searches.length) return null;
+  const candidates = Array.isArray(automation?.source_candidates) ? automation.source_candidates : [];
+  if (!tasks.length && !searches.length && !candidates.length) return null;
 
   return (
-    <div className="mt-3 grid gap-3 md:grid-cols-2">
+    <div className="mt-3 space-y-3">
+      {candidates.length > 0 && (
+        <div className="rounded-2xl bg-emerald-50 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Source Drafts</p>
+          <div className="mt-2 space-y-2">
+            {candidates.slice(0, 3).map((candidate: any) => (
+              <div key={candidate.id || candidate.name} className="rounded-xl bg-white p-3">
+                <div className="flex flex-wrap gap-2">
+                  <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs text-emerald-800">{candidate.priority || "medium"}</span>
+                  <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs text-emerald-800">{candidate.source_type || "source"}</span>
+                  {candidate.language && <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs text-emerald-800">{candidate.language}</span>}
+                </div>
+                <p className="mt-2 text-sm font-medium text-slate-950">{candidate.name}</p>
+                <p className="mt-1 text-xs leading-5 text-slate-600">{candidate.search_query}</p>
+                {candidate.source_manager_url && (
+                  <a href={candidate.source_manager_url} className="mt-2 inline-flex rounded-xl bg-slate-900 px-3 py-2 text-xs font-medium text-white">
+                    Use draft
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="grid gap-3 md:grid-cols-2">
       {tasks.length > 0 && (
         <div className="rounded-2xl bg-white p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Coverage Tasks</p>
@@ -98,6 +123,7 @@ function ClusterAutomation({ automation }: { automation: any }) {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

@@ -255,6 +255,37 @@ export function SourcesClient() {
     loadSources();
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const draftName = params.get("draft_name");
+    const searchQuery = params.get("search_query");
+    if (!draftName && !searchQuery) return;
+
+    const feedType = params.get("feed_type");
+    setSourceForm((current) => ({
+      ...current,
+      name: draftName || current.name || "Suggested source",
+      website_url: params.get("website_url") || current.website_url,
+      rss_url: params.get("rss_url") || current.rss_url,
+      country: params.get("country") || current.country,
+      language: params.get("language") || current.language,
+      region: params.get("region") || current.region,
+      source_size: params.get("source_size") || current.source_size,
+      source_type: params.get("source_type") || current.source_type,
+      feed_type: feedType === "rss" || feedType === "homepage" || feedType === "manual" ? feedType : current.feed_type,
+      credibility_notes:
+        params.get("credibility_notes") ||
+        (searchQuery ? `Suggested source search: ${searchQuery}` : current.credibility_notes),
+    }));
+    setSourceCreateResult({
+      draft: {
+        search_query: searchQuery,
+        source_manager_url: window.location.pathname + window.location.search,
+      },
+    });
+  }, []);
+
   function updateAdminKey(value: string) {
     setAdminKey(value);
     if (typeof window !== "undefined") {
@@ -332,8 +363,8 @@ export function SourcesClient() {
       setError("RSS URL is required for RSS sources.");
       return;
     }
-    if (feedType !== "rss" && !websiteUrl) {
-      setError("Website URL is required for homepage and manual sources.");
+    if (feedType === "homepage" && !websiteUrl) {
+      setError("Website URL is required for homepage sources.");
       return;
     }
 
@@ -955,6 +986,11 @@ export function SourcesClient() {
                 </a>
               )}
             </div>
+            {sourceCreateResult?.draft?.search_query && (
+              <p className="rounded-lg bg-emerald-50 p-3 text-sm leading-6 text-emerald-800">
+                Draft loaded from cluster automation. Search query: {sourceCreateResult.draft.search_query}
+              </p>
+            )}
             {sourceCreateResult?.source?.name && (
               <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">
                 Added {sourceCreateResult.source.name} with {sourceCreateResult.feed?.feed_type || "no"} feed.
