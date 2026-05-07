@@ -56,6 +56,16 @@ type SourceFormState = {
 type SourceDraftContext = {
   cluster_id?: string | null;
   candidate_id?: string | null;
+  name?: string | null;
+  website_url?: string | null;
+  rss_url?: string | null;
+  country?: string | null;
+  language?: string | null;
+  region?: string | null;
+  source_size?: string | null;
+  source_type?: string | null;
+  feed_type?: "rss" | "homepage" | "manual" | null;
+  credibility_notes?: string | null;
   search_query?: string | null;
   source_manager_url?: string;
   status?: string | null;
@@ -229,6 +239,9 @@ export function SourcesClient() {
   const [seeding, setSeeding] = useState(false);
   const [creatingSource, setCreatingSource] = useState(false);
   const [resolvingDraft, setResolvingDraft] = useState(false);
+  const [discoveringSources, setDiscoveringSources] = useState(false);
+  const [sourceDiscoveryResult, setSourceDiscoveryResult] = useState<any>(null);
+  const [syncAfterCreate, setSyncAfterCreate] = useState(false);
   const [syncingActive, setSyncingActive] = useState(false);
   const [analyzingPending, setAnalyzingPending] = useState(false);
   const [refreshingIntelligence, setRefreshingIntelligence] = useState(false);
@@ -291,9 +304,21 @@ export function SourcesClient() {
         params.get("credibility_notes") ||
         (searchQuery ? `Suggested source search: ${searchQuery}` : current.credibility_notes),
     }));
-    const draft = {
+    const draftFeedType: SourceDraftContext["feed_type"] =
+      feedType === "rss" || feedType === "homepage" || feedType === "manual" ? feedType : null;
+    const draft: SourceDraftContext = {
       cluster_id: clusterId,
       candidate_id: candidateId,
+      name: draftName,
+      website_url: params.get("website_url"),
+      rss_url: params.get("rss_url"),
+      country: params.get("country"),
+      language: params.get("language"),
+      region: params.get("region"),
+      source_size: params.get("source_size"),
+      source_type: params.get("source_type"),
+      feed_type: draftFeedType,
+      credibility_notes: params.get("credibility_notes"),
       search_query: searchQuery,
       source_manager_url: window.location.pathname + window.location.search,
       status: params.get("draft_status") || "draft",
@@ -422,7 +447,20 @@ export function SourcesClient() {
         },
         adminHeaders()
       );
-      setSourceCreateResult(result);
+      let finalResult = result;
+      if (syncAfterCreate && result?.source?.id && result?.feed?.feed_type && result.feed.feed_type !== "manual") {
+        try {
+          const immediateSync = await apiPost(
+            `/api/v1/sources/${encodeURIComponent(result.source.id)}/sync?limit=5&card_limit=5`,
+            {},
+            adminHeaders()
+          );
+          finalResult = { ...result, immediate_sync_result: immediateSync };
+        } catch (syncErr: any) {
+          finalResult = { ...result, immediate_sync_error: syncErr?.message || "Immediate source sync failed." };
+        }
+      }
+      setSourceCreateResult(finalResult);
       if (result?.draft_resolution?.source_candidate) {
         setSourceDraft(result.draft_resolution.source_candidate);
       }
@@ -433,6 +471,70 @@ export function SourcesClient() {
     } finally {
       setCreatingSource(false);
     }
+  }
+
+  async function discoverSourceCandidates() {
+    if (ADMIN_CONTROLS_ENABLED && !adminKey.trim()) {
+      setError("Admin key is required for source discovery.");
+      return;
+    }
+    const query = (sourceDraft?.search_query || sourceForm.name || sourceForm.credibility_notes).trim();
+    if (!query) {
+      setError("A search query is required for source discovery.");
+      return;
+    }
+    setDiscoveringSources(true);
+    setError("");
+
+    try {
+      const result = await apiPost(
+        "/api/v1/sources/discover?include_external=true&limit=8",
+        {
+          query,
+          cluster_id: sourceDraft?.cluster_id || undefined,
+          candidate_id: sourceDraft?.candidate_id || undefined,
+          country: sourceDraft?.country || sourceForm.country.trim() || undefined,
+          language: sourceDraft?.language || sourceForm.language.trim() || undefined,
+          region: sourceDraft?.region || sourceForm.region.trim() || undefined,
+          source_type: sourceDraft?.source_type || sourceForm.source_type || undefined,
+        },
+        adminHeaders()
+      );
+      setSourceDiscoveryResult(result);
+    } catch (err: any) {
+      setError(err?.message || "Could not discover source candidates.");
+    } finally {
+      setDiscoveringSources(false);
+    }
+  }
+
+  function useDiscoveredCandidate(candidate: any) {
+    const payload = candidate?.create_payload || candidate || {};
+    const feedType =
+      payload.feed_type === "rss" || payload.feed_type === "homepage" || payload.feed_type === "manual"
+        ? payload.feed_type
+        : payload.rss_url
+          ? "rss"
+          : "homepage";
+    setSourceForm((current) => ({
+      ...current,
+      name: payload.name || candidate?.name || current.name,
+      website_url: payload.website_url || candidate?.website_url || current.website_url,
+      rss_url: payload.rss_url || candidate?.rss_url || current.rss_url,
+      country: payload.country || candidate?.country || current.country,
+      language: payload.language || candidate?.language || current.language,
+      region: payload.region || candidate?.region || current.region,
+      source_size: payload.source_size || candidate?.source_size || current.source_size,
+      source_type: payload.source_type || candidate?.source_type || current.source_type,
+      feed_type: feedType,
+      credibility_notes: payload.credibility_notes || candidate?.credibility_notes || current.credibility_notes,
+    }));
+    setSyncAfterCreate(feedType !== "manual");
+    setSourceCreateResult((current: any) => ({
+      ...(current || {}),
+      discovery_candidate: candidate,
+      draft: sourceDraft,
+    }));
   }
 
   async function updateDraftResolution(status: "resolved" | "ignored" | "draft") {
@@ -1074,6 +1176,15 @@ export function SourcesClient() {
                   <ArrowRight aria-hidden="true" className="h-4 w-4" />
                 </a>
               )}
+              <label className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={syncAfterCreate}
+                  onChange={(event) => setSyncAfterCreate(event.target.checked)}
+                  className="h-4 w-4"
+                />
+                Sync after add
+              </label>
             </div>
             {sourceDraft && (
               <div className="rounded-lg bg-emerald-50 p-3 text-sm leading-6 text-emerald-900">
@@ -1128,12 +1239,91 @@ export function SourcesClient() {
                     )}
                   </div>
                 )}
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    onClick={discoverSourceCandidates}
+                    disabled={discoveringSources || !adminKey.trim()}
+                    className="rounded-lg bg-emerald-900 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {discoveringSources ? "Discovering..." : "Discover source candidates"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {sourceDiscoveryResult && (
+              <div className="rounded-lg border border-emerald-100 bg-white p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800">
+                    {sourceDiscoveryResult.summary?.candidate_count || 0} candidates
+                  </span>
+                  <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">
+                    {sourceDiscoveryResult.retrieval_mode?.external_enabled ? "external enabled" : "default database"}
+                  </span>
+                </div>
+                {sourceDiscoveryResult.retrieval_mode?.errors?.length > 0 && (
+                  <p className="mt-2 text-xs leading-5 text-amber-700">
+                    {sourceDiscoveryResult.retrieval_mode.errors[0]}
+                  </p>
+                )}
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
+                  {(sourceDiscoveryResult.candidates || []).slice(0, 6).map((candidate: any) => (
+                    <article key={candidate.id || candidate.website_url} className="rounded-lg bg-slate-50 p-3">
+                      <div className="flex flex-wrap gap-2">
+                        <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                          {candidate.discovery_method || "candidate"}
+                        </span>
+                        <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                          {scoreLabel(candidate.confidence)}
+                        </span>
+                        {candidate.existing_source_id && (
+                          <span className="rounded-full bg-white px-2 py-1 text-xs text-emerald-800">existing</span>
+                        )}
+                      </div>
+                      <p className="mt-2 text-sm font-semibold text-slate-950">{candidate.name}</p>
+                      <p className="mt-1 text-xs leading-5 text-slate-600">
+                        {[candidate.country, candidate.language, candidate.source_type].filter(Boolean).join(" / ") || candidate.website_url}
+                      </p>
+                      {candidate.rss_url && (
+                        <p className="mt-1 text-xs leading-5 text-slate-500">RSS: {candidate.rss_url}</p>
+                      )}
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => useDiscoveredCandidate(candidate)}
+                          className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white"
+                        >
+                          Use candidate
+                        </button>
+                        {candidate.existing_source_id && (
+                          <a
+                            href={`/sources/${encodeURIComponent(candidate.existing_source_id)}`}
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700"
+                          >
+                            Open existing
+                          </a>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                </div>
               </div>
             )}
             {sourceCreateResult?.source?.name && (
               <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">
                 Added {sourceCreateResult.source.name} with {sourceCreateResult.feed?.feed_type || "no"} feed
                 {sourceCreateResult?.draft_resolution ? " and updated the source draft." : "."}
+              </p>
+            )}
+            {sourceCreateResult?.immediate_sync_result && (
+              <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+                Immediate sync finished with {sourceCreateResult.immediate_sync_result.article_count || 0} articles and{" "}
+                {sourceCreateResult.immediate_sync_result.error_count || 0} errors.
+              </p>
+            )}
+            {sourceCreateResult?.immediate_sync_error && (
+              <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                Source was added, but immediate sync failed: {sourceCreateResult.immediate_sync_error}
               </p>
             )}
           </form>
