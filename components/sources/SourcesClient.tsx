@@ -194,6 +194,25 @@ function validationLabel(status?: string) {
   return (status || "not_validated").replace(/_/g, " ");
 }
 
+function workflowStyles(status?: string) {
+  if (status === "completed" || status === "validated") return "bg-emerald-50 text-emerald-800";
+  if (status === "partial" || status === "needs_review") return "bg-amber-50 text-amber-800";
+  if (status === "failed") return "bg-rose-50 text-rose-700";
+  return "bg-slate-100 text-slate-700";
+}
+
+function phaseOutput(phase: any) {
+  return (
+    phase?.article_count ||
+    phase?.analyzed_count ||
+    phase?.card_count ||
+    phase?.cluster_count ||
+    phase?.sample_size ||
+    phase?.item_count ||
+    0
+  );
+}
+
 function HealthBadge({ health }: { health?: SourceHealth }) {
   const label = health?.label || "Needs review";
   return (
@@ -242,6 +261,9 @@ export function SourcesClient() {
   const [clusterRuns, setClusterRuns] = useState<any[]>([]);
   const [pipelineResult, setPipelineResult] = useState<any>(null);
   const [deliveryResult, setDeliveryResult] = useState<any>(null);
+  const [sourceDiscoveryRuns, setSourceDiscoveryRuns] = useState<any[]>([]);
+  const [sourceValidationRuns, setSourceValidationRuns] = useState<any[]>([]);
+  const [sourceOnboardingRuns, setSourceOnboardingRuns] = useState<any[]>([]);
   const [opsAlerts, setOpsAlerts] = useState<OpsAlert[]>([]);
   const [opsSummary, setOpsSummary] = useState<any>(null);
   const [sourceForm, setSourceForm] = useState<SourceFormState>(EMPTY_SOURCE_FORM);
@@ -252,6 +274,7 @@ export function SourcesClient() {
   const [resolvingDraft, setResolvingDraft] = useState(false);
   const [discoveringSources, setDiscoveringSources] = useState(false);
   const [validatingCandidateId, setValidatingCandidateId] = useState("");
+  const [onboardingCandidateId, setOnboardingCandidateId] = useState("");
   const [sourceDiscoveryResult, setSourceDiscoveryResult] = useState<any>(null);
   const [selectedDiscoveryCandidate, setSelectedDiscoveryCandidate] = useState<any>(null);
   const [allowUnvalidatedCreate, setAllowUnvalidatedCreate] = useState(false);
@@ -380,6 +403,29 @@ export function SourcesClient() {
     const data = await apiGet("/api/v1/intelligence/clusters/runs?limit=6", adminHeaders());
     setClusterRuns(data?.runs || []);
   }
+
+  async function loadSourceWorkflowRuns() {
+    if (!ADMIN_CONTROLS_ENABLED || !adminKey.trim()) return;
+    try {
+      const [discoveryData, validationData, onboardingData] = await Promise.all([
+        apiGet("/api/v1/sources/discovery-runs?limit=6", adminHeaders()),
+        apiGet("/api/v1/sources/validation-runs?limit=6", adminHeaders()),
+        apiGet("/api/v1/sources/onboarding-runs?limit=8", adminHeaders()),
+      ]);
+      setSourceDiscoveryRuns(discoveryData?.runs || []);
+      setSourceValidationRuns(validationData?.runs || []);
+      setSourceOnboardingRuns(onboardingData?.runs || []);
+    } catch {
+      setSourceDiscoveryRuns([]);
+      setSourceValidationRuns([]);
+      setSourceOnboardingRuns([]);
+    }
+  }
+
+  useEffect(() => {
+    if (!ADMIN_CONTROLS_ENABLED || !adminKey.trim()) return;
+    loadSourceWorkflowRuns();
+  }, [adminKey]);
 
   async function seedDefaults() {
     if (ADMIN_CONTROLS_ENABLED && !adminKey.trim()) {
@@ -554,6 +600,7 @@ export function SourcesClient() {
       setSourceDiscoveryResult(result);
       setSelectedDiscoveryCandidate(null);
       setAllowUnvalidatedCreate(false);
+      await loadSourceWorkflowRuns();
     } catch (err: any) {
       setError(err?.message || "Could not discover source candidates.");
     } finally {
@@ -623,10 +670,84 @@ export function SourcesClient() {
       if (selectAfterValidation) {
         useDiscoveredCandidate(enrichedCandidate);
       }
+      await loadSourceWorkflowRuns();
     } catch (err: any) {
       setError(err?.message || "Could not validate source candidate.");
     } finally {
       setValidatingCandidateId("");
+    }
+  }
+
+  async function onboardDiscoveredCandidate(candidate: any) {
+    if (ADMIN_CONTROLS_ENABLED && !adminKey.trim()) {
+      setError("Admin key is required for source onboarding.");
+      return;
+    }
+    const validationStatus = candidate?.validation_status || candidate?.validation?.status;
+    if (validationStatus !== "validated" && !allowUnvalidatedCreate) {
+      setError("Validate the source candidate before onboarding it, or enable validation override.");
+      return;
+    }
+    const payload = candidate?.create_payload || candidate || {};
+    setOnboardingCandidateId(candidate?.id || candidate?.website_url || "candidate");
+    setError("");
+
+    try {
+      const result = await apiPost(
+        "/api/v1/sources/discover/onboard?sync_article_limit=5&sync_card_limit=5&analysis_article_limit=10&intelligence_article_limit=50&cluster_article_limit=100&cluster_limit=50&cluster_card_limit=20",
+        {
+          candidate,
+          source_payload: {
+            name: sourceForm.name.trim() || payload.name || candidate?.name || undefined,
+            website_url: sourceForm.website_url.trim() || payload.website_url || candidate?.website_url || undefined,
+            rss_url:
+              sourceForm.feed_type === "rss"
+                ? sourceForm.rss_url.trim() || payload.rss_url || candidate?.rss_url || undefined
+                : payload.rss_url || candidate?.rss_url || undefined,
+            country: sourceForm.country.trim() || payload.country || candidate?.country || undefined,
+            language: sourceForm.language.trim() || payload.language || candidate?.language || undefined,
+            region: sourceForm.region.trim() || payload.region || candidate?.region || undefined,
+            source_size: sourceForm.source_size || payload.source_size || candidate?.source_size || undefined,
+            source_type: sourceForm.source_type || payload.source_type || candidate?.source_type || undefined,
+            feed_type: sourceForm.feed_type || payload.feed_type || candidate?.feed_type || undefined,
+            credibility_notes: sourceForm.credibility_notes.trim() || payload.credibility_notes || candidate?.credibility_notes || undefined,
+          },
+          draft_cluster_id: sourceDraft?.cluster_id || undefined,
+          draft_candidate_id: sourceDraft?.candidate_id || undefined,
+          draft_resolution_notes: "Source onboarded from source manager.",
+          allow_unvalidated: allowUnvalidatedCreate,
+          allow_homepage_fallback: true,
+          sync_after_create: true,
+          analyze_after_sync: true,
+          refresh_intelligence: true,
+          refresh_clusters: Boolean(sourceDraft?.cluster_id),
+        },
+        adminHeaders()
+      );
+      setSourceCreateResult({
+        ...(result || {}),
+        onboarding_result: result,
+        draft_resolution: result?.results?.draft_resolution,
+      });
+      if (result?.candidate) {
+        setSourceDiscoveryResult((current: any) => ({
+          ...(current || {}),
+          candidates: (current?.candidates || []).map((item: any) =>
+            (item.id || item.website_url) === (candidate.id || candidate.website_url) ? result.candidate : item
+          ),
+          latest_onboarding: result,
+        }));
+        setSelectedDiscoveryCandidate(result.candidate);
+      }
+      if (result?.results?.draft_resolution?.source_candidate) {
+        setSourceDraft(result.results.draft_resolution.source_candidate);
+      }
+      await loadSources();
+      await loadSourceWorkflowRuns();
+    } catch (err: any) {
+      setError(err?.message || "Could not onboard source candidate.");
+    } finally {
+      setOnboardingCandidateId("");
     }
   }
 
@@ -1364,6 +1485,11 @@ export function SourcesClient() {
                   <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">
                     {sourceDiscoveryResult.retrieval_mode?.external_enabled ? "external enabled" : "default database"}
                   </span>
+                  {sourceDiscoveryResult.discovery_run?.id && (
+                    <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700">
+                      run {sourceDiscoveryResult.discovery_run.id.slice(0, 8)}
+                    </span>
+                  )}
                 </div>
                 {sourceDiscoveryResult.retrieval_mode?.errors?.length > 0 && (
                   <p className="mt-2 text-xs leading-5 text-amber-700">
@@ -1425,6 +1551,18 @@ export function SourcesClient() {
                             Validate and use
                           </button>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => onboardDiscoveredCandidate(candidate)}
+                          disabled={
+                            !!onboardingCandidateId ||
+                            ((candidate.validation_status || candidate.validation?.status) !== "validated" &&
+                              !allowUnvalidatedCreate)
+                          }
+                          className="rounded-lg bg-emerald-900 px-3 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {onboardingCandidateId === (candidate.id || candidate.website_url) ? "Onboarding..." : "Onboard"}
+                        </button>
                         {candidate.existing_source_id && (
                           <a
                             href={`/sources/${encodeURIComponent(candidate.existing_source_id)}`}
@@ -1444,6 +1582,39 @@ export function SourcesClient() {
                 Added {sourceCreateResult.source.name} with {sourceCreateResult.feed?.feed_type || "no"} feed
                 {sourceCreateResult?.draft_resolution ? " and updated the source draft." : "."}
               </p>
+            )}
+            {sourceCreateResult?.onboarding_result && (
+              <div className="space-y-2 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700">
+                <div className="flex flex-wrap gap-2">
+                  <span className={`rounded-full px-2 py-1 text-xs capitalize ${workflowStyles(sourceCreateResult.onboarding_result.status)}`}>
+                    onboarding {sourceCreateResult.onboarding_result.status}
+                  </span>
+                  <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                    {sourceCreateResult.onboarding_result.summary?.coverage_delta?.synced_articles || 0} synced
+                  </span>
+                  <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                    {sourceCreateResult.onboarding_result.summary?.coverage_delta?.analyzed_articles || 0} analyzed
+                  </span>
+                  {sourceCreateResult.onboarding_result.run?.id && (
+                    <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                      run {sourceCreateResult.onboarding_result.run.id.slice(0, 8)}
+                    </span>
+                  )}
+                </div>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {(sourceCreateResult.onboarding_result.phases || []).map((phase: any) => (
+                    <div key={phase.name} className="rounded-lg bg-white p-2 text-xs text-slate-600">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-slate-900">{phase.name}</span>
+                        <span className={`rounded-full px-2 py-1 capitalize ${workflowStyles(phase.status)}`}>
+                          {phase.status}
+                        </span>
+                      </div>
+                      <p className="mt-1">{phaseOutput(phase)} outputs</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
             {sourceCreateResult?.immediate_sync_result && (
               <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
@@ -1477,6 +1648,84 @@ export function SourcesClient() {
               </p>
             )}
           </form>
+        </section>
+      )}
+
+      {ADMIN_CONTROLS_ENABLED && (sourceOnboardingRuns.length > 0 || sourceDiscoveryRuns.length > 0 || sourceValidationRuns.length > 0) && (
+        <section className="rounded-lg border border-slate-200 bg-white p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-base font-semibold text-slate-950">Source workflow history</h2>
+            <button
+              onClick={loadSourceWorkflowRuns}
+              disabled={!adminKey.trim()}
+              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Refresh
+            </button>
+          </div>
+          {sourceOnboardingRuns.length > 0 && (
+            <div className="mt-4 space-y-2">
+              {sourceOnboardingRuns.slice(0, 5).map((run) => (
+                <article key={run.id} className="rounded-lg bg-slate-50 p-3">
+                  <div className="flex flex-wrap gap-2">
+                    <span className={`rounded-full px-2 py-1 text-xs capitalize ${workflowStyles(run.status)}`}>
+                      {run.status}
+                    </span>
+                    <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                      {run.source_name || "source onboarding"}
+                    </span>
+                    <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                      {formatDateTime(run.created_at)}
+                    </span>
+                  </div>
+                  <div className="mt-2 grid gap-2 text-xs leading-5 text-slate-600 sm:grid-cols-4">
+                    <span>{run.summary?.coverage_delta?.synced_articles || 0} synced</span>
+                    <span>{run.summary?.coverage_delta?.analyzed_articles || 0} analyzed</span>
+                    <span>{run.summary?.coverage_delta?.cluster_count || 0} clusters</span>
+                    <span>{run.errors?.length || 0} errors</span>
+                  </div>
+                  {(run.phases || []).length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {(run.phases || []).slice(0, 6).map((phase: any) => (
+                        <span key={`${run.id}-${phase.name}`} className={`rounded-full px-2 py-1 text-xs capitalize ${workflowStyles(phase.status)}`}>
+                          {phase.name}: {phase.status}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <div className="rounded-lg bg-slate-50 p-3">
+              <h3 className="text-xs font-semibold uppercase text-slate-500">Discovery</h3>
+              <div className="mt-2 space-y-2">
+                {sourceDiscoveryRuns.slice(0, 3).map((run) => (
+                  <div key={run.id} className="grid gap-1 text-xs leading-5 text-slate-600">
+                    <span className="font-medium text-slate-900">{run.query}</span>
+                    <span>{run.candidate_count || 0} candidates / {run.existing_source_match_count || 0} existing</span>
+                  </div>
+                ))}
+                {!sourceDiscoveryRuns.length && <p className="text-xs text-slate-500">No discovery runs yet.</p>}
+              </div>
+            </div>
+            <div className="rounded-lg bg-slate-50 p-3">
+              <h3 className="text-xs font-semibold uppercase text-slate-500">Validation</h3>
+              <div className="mt-2 space-y-2">
+                {sourceValidationRuns.slice(0, 3).map((run) => (
+                  <div key={run.id} className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                    <span className={`rounded-full px-2 py-1 capitalize ${workflowStyles(run.status)}`}>
+                      {run.status}
+                    </span>
+                    <span>{run.item_count || 0} items</span>
+                    <span>{run.selected_feed_type || "no feed"}</span>
+                  </div>
+                ))}
+                {!sourceValidationRuns.length && <p className="text-xs text-slate-500">No validation runs yet.</p>}
+              </div>
+            </div>
+          </div>
         </section>
       )}
 

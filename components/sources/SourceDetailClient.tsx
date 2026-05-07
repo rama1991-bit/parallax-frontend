@@ -71,6 +71,15 @@ type SourceDetail = {
     error_count: number;
     summary?: Record<string, any>;
   }>;
+  onboarding_runs?: Array<{
+    id: string;
+    status: string;
+    created_at: string;
+    duration_ms?: number;
+    phases?: any[];
+    errors?: any[];
+    summary?: Record<string, any>;
+  }>;
   profile: {
     sample_size: number;
     analysis_quality_score?: number | null;
@@ -191,6 +200,7 @@ function phase2SourceToDetail(data: any): SourceDetail {
     quality,
     feeds: data?.feeds || [],
     sync_runs: data?.sync_runs || [],
+    onboarding_runs: data?.onboarding_runs || [],
     profile: {
       sample_size: articles.length,
       analysis_quality_score: null,
@@ -281,6 +291,13 @@ function reviewLabel(status?: string) {
 
 function deliveryLabel(status?: string) {
   return (status || "not_sent").replace(/_/g, " ");
+}
+
+function workflowStyles(status?: string) {
+  if (status === "completed" || status === "validated") return "bg-emerald-50 text-emerald-800";
+  if (status === "partial" || status === "needs_review") return "bg-amber-50 text-amber-800";
+  if (status === "failed") return "bg-rose-50 text-rose-700";
+  return "bg-slate-100 text-slate-700";
 }
 
 function asList(value: any): string[] {
@@ -1201,6 +1218,43 @@ export function SourceDetailClient({ sourceId }: { sourceId: string }) {
                   <span>Cards: {run.card_count}</span>
                   <span>Errors: {run.error_count}</span>
                 </div>
+              </article>
+            ))}
+          </div>
+        </Section>
+      ) : null}
+
+      {detail.onboarding_runs?.length ? (
+        <Section title="Onboarding Timeline">
+          <div className="space-y-3">
+            {detail.onboarding_runs.slice(0, 6).map((run) => (
+              <article key={run.id} className="rounded-lg bg-slate-50 p-3">
+                <div className="flex flex-wrap gap-2">
+                  <span className={`rounded-full px-2 py-1 text-xs capitalize ${workflowStyles(run.status)}`}>
+                    {run.status}
+                  </span>
+                  <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                    {Math.round((run.duration_ms || 0) / 1000)}s
+                  </span>
+                  <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-700">
+                    {formatDateTime(run.created_at)}
+                  </span>
+                </div>
+                <div className="mt-2 grid gap-1 text-xs leading-5 text-slate-600 sm:grid-cols-4">
+                  <span>{run.summary?.coverage_delta?.synced_articles || 0} synced</span>
+                  <span>{run.summary?.coverage_delta?.analyzed_articles || 0} analyzed</span>
+                  <span>{run.summary?.coverage_delta?.cluster_count || 0} clusters</span>
+                  <span>{run.errors?.length || 0} errors</span>
+                </div>
+                {(run.phases || []).length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(run.phases || []).slice(0, 6).map((phase: any) => (
+                      <span key={`${run.id}-${phase.name}`} className={`rounded-full px-2 py-1 text-xs capitalize ${workflowStyles(phase.status)}`}>
+                        {phase.name}: {phase.status}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </article>
             ))}
           </div>
