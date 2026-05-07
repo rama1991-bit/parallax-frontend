@@ -293,17 +293,25 @@ function ClusterAutomation({ automation }: { automation: any }) {
             {candidates.slice(0, 4).map((candidate: any) => (
               <article key={candidate.id || candidate.name} className="rounded-2xl bg-emerald-50 p-3">
                 <div className="flex flex-wrap gap-2">
+                  <span className="rounded-full bg-white px-2 py-1 text-xs capitalize text-emerald-800">{candidate.status || "draft"}</span>
                   <span className="rounded-full bg-white px-2 py-1 text-xs text-emerald-800">{candidate.priority || "medium"}</span>
                   <span className="rounded-full bg-white px-2 py-1 text-xs text-emerald-800">{candidate.source_type || "source"}</span>
                   {candidate.language && <span className="rounded-full bg-white px-2 py-1 text-xs text-emerald-800">{candidate.language}</span>}
                 </div>
                 <p className="mt-2 text-sm font-medium text-emerald-950">{candidate.name}</p>
                 <p className="mt-1 text-xs leading-5 text-emerald-900">{candidate.search_query}</p>
-                {candidate.source_manager_url && (
-                  <a href={candidate.source_manager_url} className="mt-2 inline-flex rounded-xl bg-white px-3 py-2 text-xs font-medium text-emerald-900">
-                    Use draft
-                  </a>
-                )}
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {candidate.source_manager_url && (
+                    <a href={candidate.source_manager_url} className="inline-flex rounded-xl bg-white px-3 py-2 text-xs font-medium text-emerald-900">
+                      Use draft
+                    </a>
+                  )}
+                  {candidate.source_id && (
+                    <a href={`/sources/${encodeURIComponent(candidate.source_id)}`} className="inline-flex rounded-xl bg-white px-3 py-2 text-xs font-medium text-emerald-900">
+                      Open source
+                    </a>
+                  )}
+                </div>
               </article>
             ))}
           </div>

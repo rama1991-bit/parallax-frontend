@@ -53,6 +53,15 @@ type SourceFormState = {
   credibility_notes: string;
 };
 
+type SourceDraftContext = {
+  cluster_id?: string | null;
+  candidate_id?: string | null;
+  search_query?: string | null;
+  source_manager_url?: string;
+  status?: string | null;
+  source_id?: string | null;
+};
+
 type SourceHealth = {
   status: "healthy" | "stale" | "error" | "needs_review" | string;
   label?: string;
@@ -219,6 +228,7 @@ export function SourcesClient() {
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
   const [creatingSource, setCreatingSource] = useState(false);
+  const [resolvingDraft, setResolvingDraft] = useState(false);
   const [syncingActive, setSyncingActive] = useState(false);
   const [analyzingPending, setAnalyzingPending] = useState(false);
   const [refreshingIntelligence, setRefreshingIntelligence] = useState(false);
@@ -227,6 +237,7 @@ export function SourcesClient() {
   const [evaluatingOps, setEvaluatingOps] = useState(false);
   const [deliveringOps, setDeliveringOps] = useState(false);
   const [adminKey, setAdminKey] = useState("");
+  const [sourceDraft, setSourceDraft] = useState<SourceDraftContext | null>(null);
   const [error, setError] = useState("");
 
   async function loadSources() {
@@ -260,6 +271,8 @@ export function SourcesClient() {
     const params = new URLSearchParams(window.location.search);
     const draftName = params.get("draft_name");
     const searchQuery = params.get("search_query");
+    const clusterId = params.get("cluster_id");
+    const candidateId = params.get("candidate_id");
     if (!draftName && !searchQuery) return;
 
     const feedType = params.get("feed_type");
@@ -278,12 +291,16 @@ export function SourcesClient() {
         params.get("credibility_notes") ||
         (searchQuery ? `Suggested source search: ${searchQuery}` : current.credibility_notes),
     }));
-    setSourceCreateResult({
-      draft: {
-        search_query: searchQuery,
-        source_manager_url: window.location.pathname + window.location.search,
-      },
-    });
+    const draft = {
+      cluster_id: clusterId,
+      candidate_id: candidateId,
+      search_query: searchQuery,
+      source_manager_url: window.location.pathname + window.location.search,
+      status: params.get("draft_status") || "draft",
+      source_id: params.get("source_id"),
+    };
+    setSourceDraft(draft);
+    setSourceCreateResult({ draft });
   }, []);
 
   function updateAdminKey(value: string) {
@@ -385,16 +402,88 @@ export function SourcesClient() {
           source_type: sourceForm.source_type || undefined,
           feed_type: feedType,
           credibility_notes: sourceForm.credibility_notes.trim() || undefined,
+          draft_cluster_id: sourceDraft?.cluster_id || undefined,
+          draft_candidate_id: sourceDraft?.candidate_id || undefined,
+          draft_payload: sourceDraft
+            ? {
+                ...sourceDraft,
+                name,
+                website_url: websiteUrl || undefined,
+                rss_url: feedType === "rss" ? rssUrl : undefined,
+                country: sourceForm.country.trim() || undefined,
+                language: sourceForm.language.trim() || undefined,
+                region: sourceForm.region.trim() || undefined,
+                source_size: sourceForm.source_size || undefined,
+                source_type: sourceForm.source_type || undefined,
+                feed_type: feedType,
+                credibility_notes: sourceForm.credibility_notes.trim() || undefined,
+              }
+            : undefined,
         },
         adminHeaders()
       );
       setSourceCreateResult(result);
+      if (result?.draft_resolution?.source_candidate) {
+        setSourceDraft(result.draft_resolution.source_candidate);
+      }
       setSourceForm(EMPTY_SOURCE_FORM);
       await loadSources();
     } catch (err: any) {
       setError(err?.message || "Could not create source.");
     } finally {
       setCreatingSource(false);
+    }
+  }
+
+  async function updateDraftResolution(status: "resolved" | "ignored" | "draft") {
+    if (ADMIN_CONTROLS_ENABLED && !adminKey.trim()) {
+      setError("Admin key is required for source draft updates.");
+      return;
+    }
+    if (!sourceDraft?.cluster_id || !sourceDraft?.candidate_id) {
+      setError("This draft is missing cluster context.");
+      return;
+    }
+    setResolvingDraft(true);
+    setError("");
+
+    try {
+      const result = await apiPost(
+        `/api/v1/intelligence/clusters/${encodeURIComponent(sourceDraft.cluster_id)}/source-drafts/${encodeURIComponent(sourceDraft.candidate_id)}/resolve`,
+        {
+          status,
+          resolution_notes:
+            status === "ignored"
+              ? "Draft ignored from source manager."
+              : status === "resolved"
+                ? "Coverage gap marked resolved from source manager."
+                : "Draft reopened from source manager.",
+          draft_payload: {
+            ...sourceDraft,
+            name: sourceForm.name.trim() || undefined,
+            website_url: sourceForm.website_url.trim() || undefined,
+            rss_url: sourceForm.rss_url.trim() || undefined,
+            country: sourceForm.country.trim() || undefined,
+            language: sourceForm.language.trim() || undefined,
+            region: sourceForm.region.trim() || undefined,
+            source_size: sourceForm.source_size || undefined,
+            source_type: sourceForm.source_type || undefined,
+            feed_type: sourceForm.feed_type,
+            credibility_notes: sourceForm.credibility_notes.trim() || undefined,
+          },
+        },
+        adminHeaders()
+      );
+      setSourceDraft(result?.source_candidate || sourceDraft);
+      setSourceCreateResult((current: any) => ({
+        ...(current || {}),
+        draft: result?.source_candidate || sourceDraft,
+        draft_resolution: result,
+      }));
+    } catch (err: any) {
+      setError(err?.message || "Could not update source draft.");
+    } finally {
+      setResolvingDraft(false);
     }
   }
 
@@ -986,14 +1075,65 @@ export function SourcesClient() {
                 </a>
               )}
             </div>
-            {sourceCreateResult?.draft?.search_query && (
-              <p className="rounded-lg bg-emerald-50 p-3 text-sm leading-6 text-emerald-800">
-                Draft loaded from cluster automation. Search query: {sourceCreateResult.draft.search_query}
-              </p>
+            {sourceDraft && (
+              <div className="rounded-lg bg-emerald-50 p-3 text-sm leading-6 text-emerald-900">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full bg-white px-2 py-1 text-xs capitalize text-emerald-800">
+                    {sourceDraft.status || "draft"}
+                  </span>
+                  {sourceDraft.cluster_id && (
+                    <span className="rounded-full bg-white px-2 py-1 text-xs text-emerald-800">
+                      cluster linked
+                    </span>
+                  )}
+                  {sourceDraft.source_id && (
+                    <a
+                      href={`/sources/${encodeURIComponent(sourceDraft.source_id)}`}
+                      className="rounded-full bg-white px-2 py-1 text-xs font-medium text-emerald-900"
+                    >
+                      Open created source
+                    </a>
+                  )}
+                </div>
+                <p className="mt-2">
+                  Draft loaded from cluster automation{sourceDraft.search_query ? `: ${sourceDraft.search_query}` : "."}
+                </p>
+                {sourceDraft.cluster_id && sourceDraft.candidate_id && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => updateDraftResolution("ignored")}
+                      disabled={resolvingDraft || !adminKey.trim() || sourceDraft.status === "ignored"}
+                      className="rounded-lg bg-white px-3 py-2 text-xs font-medium text-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {resolvingDraft ? "Updating..." : "Ignore draft"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updateDraftResolution("resolved")}
+                      disabled={resolvingDraft || !adminKey.trim() || sourceDraft.status === "resolved" || sourceDraft.status === "created"}
+                      className="rounded-lg bg-white px-3 py-2 text-xs font-medium text-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Mark resolved
+                    </button>
+                    {sourceDraft.status && sourceDraft.status !== "draft" && (
+                      <button
+                        type="button"
+                        onClick={() => updateDraftResolution("draft")}
+                        disabled={resolvingDraft || !adminKey.trim()}
+                        className="rounded-lg bg-white px-3 py-2 text-xs font-medium text-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Reopen
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
             {sourceCreateResult?.source?.name && (
               <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">
-                Added {sourceCreateResult.source.name} with {sourceCreateResult.feed?.feed_type || "no"} feed.
+                Added {sourceCreateResult.source.name} with {sourceCreateResult.feed?.feed_type || "no"} feed
+                {sourceCreateResult?.draft_resolution ? " and updated the source draft." : "."}
               </p>
             )}
           </form>
